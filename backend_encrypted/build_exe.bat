@@ -61,6 +61,18 @@ if exist ".env" copy /Y ".env" "dist\BinaryAlgoPrime\.env" >nul
 if exist ".env.example" copy /Y ".env.example" "dist\BinaryAlgoPrime\.env.example" >nul
 if exist "data" xcopy /E /I /Y "data" "dist\BinaryAlgoPrime\data" >nul
 
+REM ---- create a safe launcher that keeps the window open + logs everything ----
+(
+echo @echo off
+echo cd /d "%%~dp0"
+echo BinaryAlgoPrime.exe ^> run_log.txt 2^>^&1
+echo echo.
+echo echo ---------- run_log.txt ----------
+echo type run_log.txt
+echo pause
+) > "dist\BinaryAlgoPrime\run.bat"
+
+
 echo.
 echo ============================================================
 echo  DONE!
