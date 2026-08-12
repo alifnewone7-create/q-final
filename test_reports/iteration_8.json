@@ -1,0 +1,39 @@
+{
+  "summary": "Backend-only testing of the new premium (custom) emoji pipeline: messages templates, aiogram Notifier, and sessions integration. Added /app/backend/tests/test_messages.py with 39 tests covering signal/result caption emoji IDs and layout, HTML escaping, strip_custom_emoji, lazy aiogram Bot construction with HTML parse_mode, send_photo/send_message success + emoji-error fallback + non-emoji error re-raise + persistent stripped mode, sessions._run_signal + send_partial routing through NOTIFY, real payout plumbing from UI['markets'], bot.py awaits NOTIFY.close(), no aiogram polling anywhere, requirements has both libs, and all backend modules import cleanly. Kept iteration_7's 31 strategy tests passing (only conftest BOT_TOKEN changed to aiogram-valid format). Final: 70/70 passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_messages.py",
+    "/app/backend/tests/test_strategies.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "messages.py: clean, single-responsibility, HTML-escapes every dynamic value (display/reason/owner_tag) while preserving <tg-emoji> tags; EMOJI ids and layout match the user's spec exactly.",
+    "notifier.py: Bot creation is properly lazy (module import does not construct a Bot), DefaultBotProperties(parse_mode=HTML) is set, TelegramBadRequest emoji-error detection uses substring matching on ('custom emoji','custom_emoji','entity','entities') which correctly discriminates 'chat not found' vs 'CUSTOM_EMOJI_INVALID'.",
+    "Fallback design is one-way (custom_emoji_ok flips False and stays there for the process lifetime); acceptable since a fresh process is a fresh Notifier and Telegram's decision is stable per bot/chat.",
+    "sessions.py no longer imports io and channel posts uniformly go through NOTIFY.send_photo / send_message; the legacy signal_caption/result_caption wrappers are preserved so nothing else breaks.",
+    "bot.py manual-selection 'sc|' path now copies payout via next(m['payout'] for m in UI['markets'] if m['code']==c, 0) instead of hardcoding 0. Verified live: caption shows 'Payout : 92%' for payout=92 and 'Payout : —' for payout=0.",
+    "Two libraries coexist safely: only python-telegram-bot polls updates (Application.run_polling); no aiogram Dispatcher or start_polling anywhere in /app/backend. post_shutdown awaits NOTIFY.close().",
+    "Minor nit (not a bug): notifier.send_photo builds a fresh BufferedInputFile in the fallback path (aiogram consumes the buffer, so this is correct); worth a code comment.",
+    "Minor nit: notifier catches only TelegramBadRequest, so a network-layer TelegramNetworkError would surface — acceptable and arguably desirable."
+  ],
+  "updated_files": [
+    "/app/backend/tests/conftest.py (BOT_TOKEN dummy switched to aiogram-valid format 123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11)",
+    "/app/backend/tests/test_messages.py (new, 39 tests)"
+  ],
+  "success_rate": {"backend": "100% (70/70)", "frontend": "N/A (backend-only)"},
+  "test_credentials": "N/A — bot never contacts Telegram; aiogram Bot only format-validates the dummy token.",
+  "seed_data_creation": "None. /app/backend/data/settings.json already contained {'mtg':'MTG-1','strategy':'classic'} and was not modified.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Two pytest suites now live in /app/backend/tests/: test_strategies.py (31, iteration 7) and test_messages.py (39, iteration 8). Together they exercise the strategy engine, message templates, aiogram Notifier fallback, sessions channel routing, and bot.py wiring — the whole backend surface except the pyquotex WS client and the live Telegram polling loop (both require real network + credentials and are out of scope). BOT_TOKEN in conftest.py MUST stay in Telegram's <digits>:<hex-string> format because aiogram Bot() validates it at construction time. If new emoji IDs are added to messages.EMOJI, update the SIGNAL_IDS/RESULT_IDS maps in test_messages.py.",
+  "rca of the issue": "N/A — no bugs found. Five initial test failures were self-inflicted test-side issues (expected PUT emoji in a CALL caption, opening-tag-only regex missing the closing </tg-emoji> before the word, and a length-based fake instead of a first-call flag for the notifier fallback tests). Fixed in the test file; the implementation code was correct throughout."
+}

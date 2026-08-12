@@ -1,0 +1,35 @@
+{
+  "summary": "Backend-only unit-test verification of the standalone Telegram signal bot. 16/16 pytest tests PASS covering: (a) empty-first-script + settings in later script tag, (a2) regex robustness for 'window.settings={...};' with no spaces, (b) no window.settings anywhere -> (None,None) with no raise, (c) malformed JSON in window.settings -> (None,None) no raise, (d) Login.__call__ returns (False, clear message) when settings missing, qx.QuotexManager.ensure_connected wraps every failure (raw exception / failed login / JSONDecodeError) as ConnectionError and deletes stale session.json, TickCollector._drain builds OHLC + drains buffer + respects started_at boundary + discard flag, get_closed_candle returns None for running minute and returns candle for past minutes, SessionManager._candles merges history with ticks (tick overrides history for same minute, running candle last, falls back to ticks when history throws). Bot runtime smoke test: bot.py started cleanly, printed banner, telegram Application started polling, TickCollector started, expected Quotex-blocked failure surfaced as CLEAN log line: '[ticks] collector error: Quotex login failed: Login failed. Unknown error — retrying in 30s' — NO Traceback, NO raw JSONDecodeError, bot kept running until timeout killed it (exit 0). Confirmed no bot.py process left running afterwards.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "bot.py shutdown", "issue": "On shutdown (timeout/SIGTERM) asyncio logs 'Task was destroyed but it is pending!' for TickCollector._run — the TICKS.stop() is never wired to Application shutdown. Not user-facing but noisy. Suggest adding a post_shutdown hook that calls TICKS.stop() and awaits the task with contextlib.suppress(CancelledError)."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_bot_units.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional/minor) Wire TICKS.stop() into a post_shutdown/post_stop hook on Application to avoid 'Task was destroyed but it is pending!' warning on bot exit."
+  ],
+  "critical_code_review_comments": [
+    "login.get_profile regex r'window\\.settings\\s*=\\s*(\\{.*?\\})\\s*;' is confirmed robust (handles spaces / no-spaces / trailing semicolon). Good.",
+    "qx.ensure_connected correctly deletes session.json on BOTH exception path AND failed-login path and wraps the underlying error as ConnectionError — this fully prevents the reported 'Expecting value: line 1 column 1 (char 0)' leakage.",
+    "ticks._run catches broad Exception and prints '[ticks] collector error: ... — retrying in 30s' — matches the desired user-facing behavior verified in the smoke test.",
+    "Minor: TickCollector task is not gracefully stopped on Application shutdown (see minor issue above).",
+    "Minor: bot.py hardcodes single-admin UI state in a module-level dict (UI = {...}). Fine for single-admin bot but worth a comment.",
+    "sessions._candles falls back to ticks when history fetch throws — good resilience."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_bot_units.py (new)",
+    "/app/backend/tests/__init__.py (new, empty)"
+  ],
+  "success_rate": {"backend": "100% (16/16 unit tests + smoke test passed)", "frontend": "N/A (no frontend)"},
+  "test_credentials": "BOT_TOKEN and ADMIN_ID from /app/backend/.env (per /app/memory/test_credentials.md). Quotex credentials present but login is Cloudflare-blocked from this pod — expected.",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Bot is a standalone python script (NO server, NO API, NO DB). Use /app/backend/tests/test_bot_units.py (pytest) — 16 tests. For runtime smoke: `pkill -f bot.py; cd /app/backend && timeout 25 python bot.py; pkill -f bot.py`. Expected clean log: '[ticks] collector error: Quotex login failed: Login failed. Unknown error — retrying in 30s' (Cloudflare block from this pod is EXPECTED — not a bug). ALWAYS pkill -f bot.py after runs to avoid Telegram getUpdates 409 conflict with the user's local bot instance."
+}

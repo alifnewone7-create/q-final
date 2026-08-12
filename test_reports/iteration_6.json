@@ -1,0 +1,48 @@
+{
+  "summary": "Backend-only regression + targeted bug-fix verification for the Quotex Telegram-bot strategy engine after the user reported ZERO signals during a 1-hour Quantum Prime M1 live session. Extended /app/backend/tests/test_strategies.py from 25 -> 38 tests (added 13 new tests across 5 new classes). Full suite: 38/38 PASSED. Verified all constants are at the relaxed values (WARMUP_MAX=45, MIN_CANDLES=45, MIN_SELECTED=8, MIN_SAMPLES=4, MIN_EDGE=0.50, MIN_EDGE_FALLBACK=0.45, ABS_MIN_SELECTED=5, REQUIRED_LAYERS=15, min_confidence=70), and all session timing constants (SCAN_START_SEC=3, SCAN_RESERVE=8, EARLY_EXIT_CONF=88.0, ANALYSIS_CANDLES=130, CHART_CANDLES=60). Measured selectivity: trend confidence median=80.0, random-walk median=39.4 (delta 40+ pts, no degeneracy). Emission on strong trend: 30/30 hit >=70%. End-to-end 60-minute simulation with 30 fake OTC markets: quantum_prime 60/60 signals, classic 60/60 signals. _wait_window correctly targets second-of-minute=3. _pick_best respects the entry_ts-8s deadline and prints 'scan deadline hit'. Early-exit at 88% confidence triggers on the very first market and short-circuits the loop. Silence diagnostic log is emitted with strategy name, markets analysed, thin-history count and best-vs-min confidence. Thin-history counter correctly counts markets whose closed-candle count < strategy.min_candles. Quantum 'about' text references '70%', '15' layers and pool size '86'. Settings file restored to defaults after tests.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_strategies.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "sessions._pick_best: the deadline is enforced BEFORE the per-market work each iteration, which is correct — one very slow market cannot spill into the entry minute.",
+    "strategies.quantum_prime: the fallback roster (weak edges 0.45..0.50) is only used when the strong roster is short of MIN_SELECTED=8. ABS_MIN_SELECTED=5 remains the only true silence condition. Good layered defense against the user's zero-signal complaint.",
+    "sessions._pick_best diagnostic message is well-scoped (only prints when best is None) and includes everything needed to debug a silent session — strategy name, checked count, thin count, top confidence and required threshold.",
+    "The confidence formula (0.45*vote + 0.25*edge + 0.30*layers) with participation-aware vote purity produced a clean median gap (80 vs 39.4) between trend and random-walk on 40 seeds each. The engine is looser than the previous 72-threshold cut but is NOT firing at 95% on noise.",
+    "sessions._wait_window uses (SCAN_START_SEC - time.time()%60) % 60 correctly — if the process wakes up at second 4, it will wait a full 59 seconds to second 3 of the next minute, which is intentional (never scan into the entry minute).",
+    "Minor: sessions.py hardcodes 'MTG-1' in result_caption regardless of storage.get_settings()['mtg']. Not a regression; noted for future consistency.",
+    "Minor: sessions._pick_best fetches ANALYSIS_CANDLES=130 candles but only analyses closed ones; on a market that has exactly 45-46 closed candles the running candle drop can push it under min_candles=45 and it will be counted as thin. Working as intended, but worth an explicit note in code."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_strategies.py (extended from 25 -> 38 tests; added TestQuantumRelaxedGates, TestSessionTimingConstants, TestSilenceDiagnostic, TestSessionEndToEnd, TestQuantumAboutText)",
+    "/app/backend/data/settings.json (restored to {\"mtg\":\"MTG-1\",\"strategy\":\"classic\"} per handoff instructions)"
+  ],
+  "success_rate": {
+    "backend": "100% (38/38 pytest cases passed)",
+    "frontend": "N/A - frontend testing skipped per request"
+  },
+  "test_credentials": "Not applicable - dummy env vars used (BOT_TOKEN=x, ADMIN_ID=1, QUOTEX_EMAIL=a@b.c, QUOTEX_PASSWORD=p). Real Telegram/Quotex were NOT contacted.",
+  "seed_data_creation": "Synthetic OHLC candle dicts generated on the fly by _trend()/_random_walk() helpers inside test_strategies.py. No files written outside the restored settings.json.",
+  "bug_fix_verification": {
+    "bug1_no_signals_relaxed_gates": "VERIFIED. 30/30 strong-trend runs cross the 70% threshold. Median trend confidence = 80.0. Constants match the relaxation spec exactly. quantum_prime still returns None below 45 candles.",
+    "bug2_earlier_signal": "VERIFIED. SCAN_START_SEC=3 -> _wait_window ends at sec=3 of the next minute. SCAN_RESERVE=8 -> deadline enforced and 'scan deadline hit' printed. EARLY_EXIT_CONF=88 -> scan aborts after the first strong market (1/20 in test).",
+    "bug3_silence_diagnostic": "VERIFIED. Diagnostic line contains strategy name, count of markets analysed, count with 'too little history', best confidence seen, and required threshold. Thin-history counter correctly captured 2/2 markets when candles < 45.",
+    "bug4_selectivity_preserved": "VERIFIED. Trend median 80.0 vs random-walk median 39.4 (gap ~40 pts). Random-walk median well below the 80-cap, so the engine has not degenerated into firing at 95% on noise.",
+    "bug5_end_to_end_60min": "VERIFIED. Quantum Prime M1 fired 60/60 minutes over 30 fake OTC markets. Classic fired 60/60 minutes. Matches main agent's own quick-check numbers.",
+    "bug6_no_regression": "VERIFIED. All 25 previous tests still pass. POOL_SIZE == 86. Quantum 'about' text now says '70%' and references '15' layers, consistent with min_confidence=70 and REQUIRED_LAYERS=15."
+  },
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Standalone Python Telegram bot (no FastAPI/React/MongoDB). Do NOT call supervisorctl restart. Run tests via: `cd /app/backend && BOT_TOKEN=x ADMIN_ID=1 QUOTEX_EMAIL=a@b.c QUOTEX_PASSWORD=p python -m pytest tests/test_strategies.py -v`. All 38 tests must pass. If any Quantum Prime tuning constant changes, update TestQuantumRelaxedGates.test_relaxed_constants + TestSessionTimingConstants.test_timing_constants first, then re-run. Always restore /app/backend/data/settings.json to {\"mtg\":\"MTG-1\",\"strategy\":\"classic\"} at the end.",
+  "rca of the issue": "User bug (zero signals in a 1h Quantum session) was correctly root-caused to overly-strict gates: MIN_CANDLES 70 (many OTC markets don't warm that fast in-session), MIN_EDGE 0.52 (rejected too many rules), MIN_SELECTED 8 with no fallback (single silence trigger), REQUIRED_LAYERS 17 (too many layers must pass), min_confidence 72. The fix relaxes each of those gates and adds a weak-edge fallback so the roster nearly always reaches 8. Combined with SCAN_START_SEC=3 + SCAN_RESERVE=8 + EARLY_EXIT_CONF=88 the scan finishes well before entry. Test suite now confirms these changes produce 60/60 signals in 60 simulated minutes over 30 markets, while random-walk selectivity is preserved (median 39.4 vs 80.0)."
+}

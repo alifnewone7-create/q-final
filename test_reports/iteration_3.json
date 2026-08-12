@@ -1,0 +1,32 @@
+{
+  "summary": "Backend-only unit test verification for the duplicate signal fix in SessionManager. Extended /app/backend/tests/test_bot_units.py with 3 new pytest cases covering the remaining fix behaviors (task lifecycle guards + mid-flow active check). Ran the full pytest suite: 32/32 tests pass (24 in test_bot_units.py + 8 in test_login_extraction.py).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_bot_units.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "sessions.py:128 close() is a sync method that calls task.cancel() but never awaits the cancellation. It works but leaves cancellation as fire-and-forget. Consider making it async and awaiting _cancel_task for stronger guarantees (currently start() does await old-task cancellation, which is what matters most for the dedup fix).",
+    "sessions.py:263 _run_signal adds the dedup key BEFORE the first send_photo call. If the first send_photo raises, the (code, entry_ts) is still marked as sent, so the retry-on-next-loop path would not re-send. This is intentional for dedup safety but worth noting in code comments.",
+    "sessions.py: no explicit locking around _sent_entries; only safe because _loop is single-tasked. The extra start()-time cancellation of previous tasks is the actual guarantee. Good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_bot_units.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "N/A"},
+  "test_credentials": "None required (fully mocked Quotex/Telegram via FakeBot/FakeQxForRun).",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "The bot is standalone python (no supervisor / no HTTP API). Run tests with: cd /app/backend && python -m pytest tests/ -v. All 32 tests pass. Duplicate-signal fix is fully covered by TestDuplicateGuard (3 tests) and TestSessionLifecycle (2 tests) inside test_bot_units.py. The ignore supervisor uvicorn misconfiguration on this container is expected — server.py does not exist.",
+  "rca of the issue": "Original duplicate signal bug RCA: (1) previous SessionManager.close() only cancelled refresh_task, leaving the _loop task running so it kept sending signals to the new session's channel after a Start->Stop->Start cycle; (2) no dedup set, so if _pick_best happened to select the same market twice in the same minute (or an overlapping task from a prior session did), a second signal+result pair would be sent. Fix verified by: TestSessionLifecycle.test_close_cancels_both_task_and_refresh_task (close cancels self.task too), TestSessionLifecycle.test_start_cancels_previous_running_tasks (start awaits _cancel_task for old task/refresh_task), TestDuplicateGuard.test_run_signal_dedup_skips_second_send_for_same_entry (second _run_signal call with same market+entry_ts is a no-op, no extra photos), TestDuplicateGuard.test_pick_best_skips_already_signaled_markets (_pick_best returns None when the only candidate is in _sent_entries for next entry_ts), TestDuplicateGuard.test_run_signal_aborts_when_session_closed_mid_flow (intermediate self.active check aborts result photo when session closed after signal photo)."
+}

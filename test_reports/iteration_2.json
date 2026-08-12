@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 2 backend verification of the rewritten pyquotex login token extraction. 24/24 pytest tests PASS (16 regression from iteration_1 + 8 NEW). New tests independently cover: (a) POST-response reuse — when Login.response already points to /trade with window.settings, get_profile extracts token with send_request.call_count == 0; (a2) minified 'window.settings={...};' in POST response still extracted with 0 extra GETs; (b) token-anywhere regex fallback — HTML lacking window.settings but containing '\"token\":\"<20 alnum>\"' still yields {'token': ...}; (c) undecodable binary content (simulated un-decoded brotli, response.text=None + garbage .content) -> (None, None) gracefully AND login_debug.html written (verified content, then auto-cleaned); (e) Login with NO .response attribute at all -> no AttributeError (getattr guard works, retry GET succeeds). EXTRA edge cases I added and verified: response.url as a non-string object (e.g. yarl.URL) — 'trade' in str(url) tolerates it; POST response URL NOT on /trade (still on /sign-in) correctly falls through to GET /trade retry; login_debug.html write failure is swallowed (get_profile still returns (None,None) cleanly). Brotli==1.2.0 pinned in requirements.txt and importable. Bot runtime smoke: pkill'd, launched, banner printed, Application started polling, expected clean single-line '[ticks] collector error: Quotex login failed: Login failed. Unknown error — retrying in 30s' (Cloudflare block from pod = expected), Application.stop() complete on SIGTERM, exit 0, NO traceback, NO 'Task was destroyed' warning this iteration. pkill -f bot.py performed afterwards — confirmed no leftover process. No login_debug.html leaked anywhere in /app.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_bot_units.py",
+    "/app/backend/tests/test_login_extraction.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "_extract_settings is well layered: raw-HTML window.settings regex -> soup script-tag scan -> final '\"token\":\"<16+ alnum>\"' anywhere regex. Verified all three paths independently.",
+    "get_profile POST-reuse guard uses getattr(self, 'response', None) AND 'trade' in str(getattr(resp,'url','')) — safe against missing attribute and non-string URL objects (yarl.URL/bytes). Verified.",
+    "Debug-file write is wrapped in try/except — will not mask the original failure if disk write itself fails. Verified.",
+    "Brotli==1.2.0 present in requirements.txt; brotli import succeeds. This resolves the reported garbage-HTML issue when the server returns br-encoded responses.",
+    "__call__ returns (False, '...Page HTML saved to login_debug.html — please share that file. Will retry.') — clear actionable message for the user.",
+    "MINOR (carryover from iteration 1, still not addressed but not user-facing): TickCollector task not gracefully cancelled on Application shutdown; no 'Task was destroyed' warning appeared this run (timeout SIGTERM path was clean), so severity is even lower — no action required unless it recurs."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_login_extraction.py (new — 8 tests for the iteration-2 rewrite + edge cases)"
+  ],
+  "success_rate": {"backend": "100% (24/24 pytest + bot runtime smoke passed)", "frontend": "N/A (no frontend)"},
+  "test_credentials": "BOT_TOKEN + Admin ID from /app/backend/.env per /app/memory/test_credentials.md. Quotex credentials present; login Cloudflare-blocked from pod — EXPECTED, not tested against real endpoint.",
+  "seed_data_creation": "None. login_debug.html created inside pytest tmp_path fixtures only; auto-cleaned by fixture. Verified no leftover files anywhere in /app.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Standalone python bot at /app/backend (no server/API/DB). Regression suite: `cd /app/backend && pytest tests/ -v` (24 tests, ~1s). Runtime smoke: `pkill -f bot.py; cd /app/backend && timeout 20 python bot.py; pkill -f bot.py`. Cloudflare-block '[ticks] collector error: Quotex login failed: Login failed. Unknown error — retrying in 30s' is EXPECTED from this pod. ALWAYS pkill -f bot.py after runs to avoid Telegram 409 with the user's local instance. Iteration-2 fix files: pyquotex/http/login.py (_extract_settings + get_profile POST-reuse + login_debug.html), requirements.txt (Brotli==1.2.0).",
+  "rca of the issue": "User's local login POST succeeded but session.json was never created because (1) requests could not decode brotli-encoded response bodies (Brotli lib missing) so window.settings was invisible, and (2) get_profile only ever inspected a fresh GET /trade response, ignoring the POST response that had already been redirected to /trade. The applied fix installs Brotli==1.2.0, reuses the POST response first, adds a 3-tier extractor (window.settings regex on raw HTML, script-tag scan, '\"token\":\"...\"' fallback anywhere), and on final failure dumps the page to login_debug.html so the user can share it. All fix branches verified by unit tests."
+}
