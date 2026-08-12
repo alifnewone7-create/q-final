@@ -31,4 +31,29 @@ try:
 except Exception:
     pass
 
-import start  # obfuscated launcher -> starts the Telegram bot
+def _main():
+    import start  # obfuscated launcher -> starts the Telegram bot
+
+
+if __name__ == "__main__":
+    try:
+        _main()
+    except SystemExit:
+        raise
+    except KeyboardInterrupt:
+        pass
+    except BaseException:
+        # show the real error instead of letting the window close instantly
+        import traceback
+        # restore a real stdout in case it was redirected by start.py
+        try:
+            sys.stdout = sys.__stdout__
+        except Exception:
+            pass
+        print("\n==================  ERROR  ==================")
+        traceback.print_exc()
+        print("=============================================")
+        try:
+            input("\nPress ENTER to close this window...")
+        except Exception:
+            pass
