@@ -1,0 +1,50 @@
+=====================================================
+  Binary Algo Prime  —  Encrypted Build (Windows)
+=====================================================
+
+এই ফোল্ডারের সব app-কোড obfuscate/encrypt করা (PyArmor) —
+কেউ পড়তে বা decompile করতে পারবে না।
+
+---------------------------------------------------
+ জরুরি: Python version
+---------------------------------------------------
+* এই build তৈরি হয়েছে Python 3.11 (Windows 64-bit) এর জন্য।
+* আপনার Windows PC-তে অবশ্যই Python 3.11 (64-bit) থাকতে হবে,
+  নাহলে encrypted runtime লোড হবে না।
+  ডাউনলোড: https://www.python.org/downloads/release/python-3119/
+
+---------------------------------------------------
+ প্রথমবার সেটআপ (একবারই)
+---------------------------------------------------
+1) এই ফোল্ডারে একটি Command Prompt / PowerShell খুলুন।
+
+2) (ঐচ্ছিক কিন্তু recommended) virtual env:
+       py -3.11 -m venv venv
+       venv\Scripts\activate
+
+3) ডিপেন্ডেন্সি ইনস্টল:
+       pip install -r requirements.txt
+
+4) .env.example ফাইলটিকে  .env  নামে rename করে
+   ভিতরের মানগুলো (BOT_TOKEN, ADMIN_ID, QUOTEX_EMAIL,
+   QUOTEX_PASSWORD ইত্যাদি) বসান।
+
+---------------------------------------------------
+ চালানো (প্রতিবার)
+---------------------------------------------------
+       python start.py
+
+* Console-এ শুধু দেখাবে:   Bot running...
+* বাকি সব log / pyquotex আউটপুট hide করা থাকবে।
+* বন্ধ করতে:  Ctrl + C
+
+---------------------------------------------------
+ নোট
+---------------------------------------------------
+* এই ফোল্ডারে engine.py ও frontend (Eel UI) নেই — আপনার
+  অনুরোধ অনুযায়ী বাদ দেওয়া হয়েছে; শুধু Telegram bot চলে।
+* pyquotex ফোল্ডারটি public open-source লাইব্রেরি, তাই সেটি
+  সাধারণ সোর্স হিসেবে রাখা (এতে আপনার নিজের কোনো গোপন কোড নেই)।
+  আপনার নিজের সব মডিউল (bot, strategies, sessions, qx, analysis,
+  charting, notifier, messages, storage, ticks, indicators_py,
+  config, start) সম্পূর্ণ encrypted.

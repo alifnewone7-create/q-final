@@ -1,0 +1,57 @@
+[
+  {
+    "session_id": "S1",
+    "date": "03.08.2026",
+    "code": "USDINR_otc",
+    "display": "USD/INR OTC",
+    "direction": "CALL",
+    "entry": "14:43",
+    "entry_ts": 1785768180,
+    "result": "WIN",
+    "channel_id": 111
+  },
+  {
+    "session_id": "S1",
+    "date": "03.08.2026",
+    "code": "USDINR_otc",
+    "display": "USD/INR OTC",
+    "direction": "CALL",
+    "entry": "14:44",
+    "entry_ts": 1785768240,
+    "result": "WIN",
+    "channel_id": 111
+  },
+  {
+    "session_id": "S1",
+    "date": "03.08.2026",
+    "code": "USDINR_otc",
+    "display": "USD/INR OTC",
+    "direction": "CALL",
+    "entry": "14:45",
+    "entry_ts": 1785768300,
+    "result": "WIN",
+    "channel_id": 111
+  },
+  {
+    "session_id": "S1",
+    "date": "03.08.2026",
+    "code": "USDINR_otc",
+    "display": "USD/INR OTC",
+    "direction": "CALL",
+    "entry": "14:45",
+    "entry_ts": 1785768300,
+    "result": "WIN",
+    "channel_id": 111
+  },
+  {
+    "session_id": "S1",
+    "date": "04.08.2026",
+    "code": "USDINR_otc",
+    "display": "USD/INR OTC",
+    "direction": "CALL",
+    "entry": "05:56",
+    "entry_ts": 1785822960,
+    "result": "WIN",
+    "channel_id": 111
+  }
+]
