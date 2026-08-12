@@ -32,7 +32,15 @@ except Exception:
     pass
 
 def _main():
-    import start  # obfuscated launcher -> starts the Telegram bot
+    import start  # obfuscated launcher module
+
+    # start.py starts the bot inside its _run() function, which only runs
+    # under `if __name__ == "__main__"`. When imported that guard is False,
+    # so we must call it explicitly.
+    if hasattr(start, "_run"):
+        start._run()
+    elif hasattr(start, "main"):
+        start.main()
 
 
 if __name__ == "__main__":
