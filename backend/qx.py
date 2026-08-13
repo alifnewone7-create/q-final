@@ -49,6 +49,17 @@ class QuotexManager:
                 email=QUOTEX_EMAIL, password=QUOTEX_PASSWORD,
                 host="qxbroker.com", lang="en",
             )
+            # Force a FRESH login every time: drop any cached/expired session
+            # so pyquotex always runs a full authenticate() instead of reusing
+            # a stale SSID token from session.json.
+            try:
+                Path("session.json").unlink(missing_ok=True)
+            except Exception:
+                pass
+            try:
+                self.client.session_data = {}
+            except Exception:
+                pass
             try:
                 check, reason = await self.client.connect()
             except Exception as e:
