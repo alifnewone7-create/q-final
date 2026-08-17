@@ -275,37 +275,9 @@ def render_chart(candles, title, badge=None, *, payout=0, entry_ts=None,
     fig.text(0.098, 0.945, "Alpha 2.0", color=ACCENT, fontsize=16, fontweight="bold",
              va="center", ha="left", family=FSANS)
 
-    # AI - V3 pill
-    fig.patches.append(FancyBboxPatch(
-        (0.176, 0.933), 0.040, 0.024, transform=fig.transFigure,
-        boxstyle="round,pad=0.003,rounding_size=0.02",
-        facecolor=PANEL2, edgecolor=BORDER, linewidth=1.0))
-    fig.text(0.196, 0.945, "AI \u00b7 V3", color=DIM, fontsize=8.5, fontweight="bold",
-             ha="center", va="center", family=FMONO)
-
-    # market name (without the (OTC) suffix) + OTC/REAL pill
-    clean_name = (market_name.replace("(OTC)", "").replace("(otc)", "")
-                  .replace("(OTC", "").strip())
-    fig.text(0.234, 0.945, clean_name.upper(), color=TEXT, fontsize=13.5,
-             fontweight="bold", va="center", ha="left", family=FMONO)
-    otc = "OTC" if "otc" in market_name.lower() else "REAL"
-    pill_x = 0.234 + 0.0093 * len(clean_name) + 0.010
-    fig.patches.append(FancyBboxPatch(
-        (pill_x, 0.934), 0.034, 0.022, transform=fig.transFigure,
-        boxstyle="round,pad=0.003,rounding_size=0.02",
-        facecolor="#3a2a08", edgecolor="#a97b12", linewidth=1.0))
-    fig.text(pill_x + 0.017, 0.945, otc, color="#f0b429",
-             fontsize=8.5, fontweight="bold", ha="center", va="center", family=FMONO)
-
     # -- center: big CALL/PUT badge (no confidence)
     d_col = CALL_COL if direction == "CALL" else PUT_COL
     tri = "\u25b2" if direction == "CALL" else "\u25bc"
-    fig.patches.append(FancyBboxPatch(
-        (0.437, 0.918), 0.13, 0.05, transform=fig.transFigure,
-        boxstyle="round,pad=0.004,rounding_size=0.02",
-        facecolor=PANEL2, edgecolor=d_col, linewidth=1.8))
-    fig.text(0.502, 0.943, f"{tri}  {direction}", color=d_col, fontsize=18,
-             fontweight="bold", ha="center", va="center", family=FMONO)
 
     # -- right: payout + signal time (UTC+6)
     fig.text(0.982, 0.958, f"Payout  {int(payout)}%", color="#f0b429", fontsize=12.5,
