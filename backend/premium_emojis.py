@@ -48,6 +48,13 @@ def load_premium_emojis():
 PREMIUM_EMOJIS = load_premium_emojis()
 
 
+def reload_premium_emojis():
+    """Re-read the JSON file at runtime (after editing data/premium_emojis.json)."""
+    global PREMIUM_EMOJIS
+    PREMIUM_EMOJIS = load_premium_emojis()
+    return PREMIUM_EMOJIS
+
+
 def p_emoji(char):
     """Convert regular emoji to premium Telegram emoji if available"""
     emoji_id = PREMIUM_EMOJIS.get(char)

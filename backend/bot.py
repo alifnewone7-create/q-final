@@ -24,6 +24,8 @@ from telegram.ext import (
     filters,
 )
 
+import notifier
+import premium_emojis
 import storage
 import strategies
 from config import BOT_TOKEN, ADMIN_ID
@@ -758,6 +760,69 @@ async def on_error(update, context):
     log.error(f"error: {context.error}")
 
 
+# ---------- Premium emoji diagnostics ----------
+
+async def cmd_emoji_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/emojitest — reload data/premium_emojis.json, validate every emoji-id and
+    send a test message here + to every connected channel, reporting whether
+    Telegram actually rendered the premium (custom) emoji."""
+    if not is_admin(update):
+        return
+
+    emojis = premium_emojis.reload_premium_emojis()
+    if not emojis:
+        await update.message.reply_text(
+            "\u26a0\ufe0f data/premium_emojis.json is empty.")
+        return
+
+    lines = [f"\U0001f48e Premium emoji check ({len(emojis)} entries)", ""]
+    ids = list(emojis.values())
+    try:
+        stickers = await NOTIFY.bot.get_custom_emoji_stickers(custom_emoji_ids=ids)
+        by_id = {s.custom_emoji_id: s.emoji for s in stickers}
+    except Exception as e:
+        by_id = {}
+        lines.append(f"\u26a0\ufe0f getCustomEmojiStickers failed: {e}")
+
+    for char, eid in emojis.items():
+        real = by_id.get(eid)
+        if real is None:
+            lines.append(f"{char} \u2192 {eid} : \u2753 id not found")
+        elif real == char:
+            lines.append(f"{char} \u2192 {eid} : \u2705 id matches emoji")
+        else:
+            lines.append(
+                f"{char} \u2192 {eid} : \u274c id belongs to {real} "
+                f"(Telegram will ignore it \u2014 use {real} as the JSON key)")
+
+    sample = " ".join(emojis.keys()) + "  PREMIUM EMOJI TEST"
+    ok_txt = "\u2705 rendered as premium"
+    bad_txt = "\u274c sent as plain emoji"
+    lines.append("")
+    try:
+        msg = await NOTIFY.send_message(update.effective_chat.id, sample)
+        ok = notifier._kept_custom_emoji(msg)
+        lines.append(f"This chat: {ok_txt if ok else bad_txt}")
+    except Exception as e:
+        lines.append(f"This chat: \u26a0\ufe0f send failed: {e}")
+
+    for ch in storage.get_channels():
+        try:
+            msg = await NOTIFY.send_message(ch["id"], sample)
+            ok = notifier._kept_custom_emoji(msg)
+            lines.append(f"{ch['title']}: {ok_txt if ok else bad_txt}")
+        except Exception as e:
+            lines.append(f"{ch['title']}: \u26a0\ufe0f send failed: {e}")
+
+    lines += [
+        "",
+        "If a channel shows \u274c while the ids match, the account that owns this "
+        "bot needs an active Telegram Premium subscription (or a Fragment username "
+        "assigned to the bot) \u2014 Telegram drops custom emoji from bots without it.",
+    ]
+    await update.message.reply_text("\n".join(lines))
+
+
 async def post_init(app):
     # start collecting tick data for ALL markets as soon as the backend starts
     await TICKS.start()
@@ -775,6 +840,7 @@ def main():
     app = (Application.builder().token(BOT_TOKEN)
            .post_init(post_init).post_shutdown(post_shutdown).build())
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("emojitest", cmd_emoji_test))
     app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(MessageHandler(filters.StatusUpdate.CHAT_SHARED, on_chat_shared))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))

@@ -68,3 +68,10 @@ Run: `cd backend && pip install -r requirements.txt && python bot.py`
 - `messages.py` templates now use plain emoji only; `notifier.py` runs `premiumize()` on every outgoing channel message/caption (HTML parse mode) with plain-emoji fallback if Telegram rejects entities.
 - Backend NOT run per user instruction; user will test on Telegram.
 - NOTE: `backend/tests/test_messages.py` still asserts the old `messages.EMOJI` tuple shape — needs updating if the test suite is run.
+
+### 2026-06 Premium emoji not rendering — diagnostics added
+- `notifier._kept_custom_emoji(msg)` + `Notifier._verify()`: Telegram drops custom_emoji entities SILENTLY (no error) when the bot is not allowed to use them, so the sent message is inspected and a one-time loud warning is logged.
+- `premium_emojis.reload_premium_emojis()` for runtime JSON reload.
+- New admin command `/emojitest` in bot.py: reloads JSON, validates every id via getCustomEmojiStickers (reports id-vs-emoji mismatch), sends a sample to the admin chat + every connected channel and reports premium vs plain per chat.
+- Telegram rule (Bot API 9.4, Feb 2026): a bot can only send custom emoji if the OWNER account has active Telegram Premium (or a Fragment username is assigned to the bot); the entity must wrap exactly the one emoji that the custom emoji id belongs to, otherwise it is ignored. Channel posts are the most restricted case.
+- Local env has no BOT_TOKEN and aiogram is not installed, so only py_compile + offline premiumize checks were possible. User tests on Telegram.
