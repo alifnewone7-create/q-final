@@ -323,7 +323,7 @@ def render_chart(candles, title, badge=None):
             clip_on=False, zorder=11)
 
     # ---- watermark ------------------------------------------------------
-    ax.text(0.5, 0.5, "Binary Algo Prime", transform=ax.transAxes, color=WM_COL,
+    ax.text(0.5, 0.5, "TaNix Alpha 2.0", transform=ax.transAxes, color=WM_COL,
             fontsize=52, fontweight="bold", alpha=0.55, ha="center", va="center",
             zorder=0, family="DejaVu Sans")
 

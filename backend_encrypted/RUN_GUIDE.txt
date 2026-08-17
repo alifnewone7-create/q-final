@@ -1,5 +1,5 @@
 =====================================================
-  Binary Algo Prime  —  Encrypted Build (Windows)
+  TaNix Alpha 2.0  —  Encrypted Build (Windows)
 =====================================================
 
 এই ফোল্ডারের সব app-কোড obfuscate/encrypt করা (PyArmor) —

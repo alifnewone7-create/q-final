@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  Binary Algo Prime  -  Build single Windows .exe
+REM  TaNix Alpha 2.0  -  Build single Windows .exe
 REM  Run this ONCE on your Windows PC (Python 3.11 64-bit)
 REM ============================================================
 
@@ -16,7 +16,7 @@ python -m pip install pyinstaller
 echo.
 echo [2/3] Building the .exe (this can take several minutes)...
 
-pyinstaller --noconfirm --clean --console --name BinaryAlgoPrime ^
+pyinstaller --noconfirm --clean --console --name TaNixAlpha2.0 ^
   --add-data "bot.py;." ^
   --add-data "start.py;." ^
   --add-data "sessions.py;." ^
@@ -57,27 +57,27 @@ pyinstaller --noconfirm --clean --console --name BinaryAlgoPrime ^
 
 echo.
 echo [3/3] Copying .env and data next to the exe ...
-if exist ".env" copy /Y ".env" "dist\BinaryAlgoPrime\.env" >nul
-if exist ".env.example" copy /Y ".env.example" "dist\BinaryAlgoPrime\.env.example" >nul
-if exist "data" xcopy /E /I /Y "data" "dist\BinaryAlgoPrime\data" >nul
+if exist ".env" copy /Y ".env" "dist\TaNixAlpha2.0\.env" >nul
+if exist ".env.example" copy /Y ".env.example" "dist\TaNixAlpha2.0\.env.example" >nul
+if exist "data" xcopy /E /I /Y "data" "dist\TaNixAlpha2.0\data" >nul
 
 REM ---- create a safe launcher that keeps the window open + logs everything ----
 (
 echo @echo off
 echo cd /d "%%~dp0"
-echo BinaryAlgoPrime.exe ^> run_log.txt 2^>^&1
+echo TaNixAlpha2.0.exe ^> run_log.txt 2^>^&1
 echo echo.
 echo echo ---------- run_log.txt ----------
 echo type run_log.txt
 echo pause
-) > "dist\BinaryAlgoPrime\run.bat"
+) > "dist\TaNixAlpha2.0\run.bat"
 
 
 echo.
 echo ============================================================
 echo  DONE!
-echo  Your app folder:  dist\BinaryAlgoPrime\
-echo  Run it:           dist\BinaryAlgoPrime\BinaryAlgoPrime.exe
+echo  Your app folder:  dist\TaNixAlpha2.0\
+echo  Run it:           dist\TaNixAlpha2.0\TaNixAlpha2.0.exe
 echo  (Put your real .env inside that folder before running.)
 echo ============================================================
 pause

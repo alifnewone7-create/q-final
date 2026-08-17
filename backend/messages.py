@@ -53,7 +53,7 @@ def _dir_emoji(direction):
 def signal_caption(display, direction, entry_str, payout, reason, owner_tag):
     payout_str = f"{int(payout)}%" if payout else "\u2014"
     return (
-        f"{em('brand')} Binary Algo Prime {em('brand')}\n"
+        f"{em('brand')} TaNix Alpha 2.0 {em('brand')}\n"
         f"{LINE}\n\n"
         f"{em('asset')} Asset : {html.escape(display)}\n\n"
         f"{em('signal')} Signal : {_dir_emoji(direction)} {direction}\n"
