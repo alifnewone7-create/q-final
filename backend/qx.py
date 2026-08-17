@@ -30,11 +30,40 @@ def category_of(code):
     return "otc" if code.endswith("_otc") else "real"
 
 
+def _session_file():
+    """Path of pyquotex's session.json (handles frozen/PyInstaller builds)."""
+    try:
+        from pyquotex.config import resource_path
+        return Path(resource_path("session.json"))
+    except Exception:
+        return Path("session.json")
+
+
 class QuotexManager:
     def __init__(self):
         self.client = None
         self.connected = False
         self._lock = asyncio.Lock()
+        # a forced brand-new login already succeeded during this run
+        self._fresh_done = False
+
+    def _make_client(self, fresh):
+        client = Quotex(
+            email=QUOTEX_EMAIL, password=QUOTEX_PASSWORD,
+            host="qxbroker.com", lang="en",
+        )
+        if fresh:
+            # Blank only the stored SSID/cookies (keep the user-agent) so
+            # pyquotex runs a full credential login instead of reusing a
+            # possibly expired token.
+            try:
+                sd = dict(client.session_data or {})
+            except Exception:
+                sd = {}
+            sd["token"] = None
+            sd["cookies"] = None
+            client.session_data = sd
+        return client
 
     async def ensure_connected(self):
         async with self._lock:
@@ -45,32 +74,37 @@ class QuotexManager:
                 except Exception:
                     pass
             self.connected = False
-            self.client = Quotex(
-                email=QUOTEX_EMAIL, password=QUOTEX_PASSWORD,
-                host="qxbroker.com", lang="en",
-            )
-            # Force a FRESH login every time: drop any cached/expired session
-            # so pyquotex always runs a full authenticate() instead of reusing
-            # a stale SSID token from session.json.
+
+            # First connection of this run -> try a brand-new login first.
+            # Later reconnects reuse the saved session first, because firing a
+            # full credential login on every retry makes Quotex reject it
+            # ("Login failed. Unknown error").
+            modes = (True, False) if not self._fresh_done else (False, True)
+            reason = "not attempted"
+            for fresh in modes:
+                self.client = self._make_client(fresh)
+                try:
+                    ok, reason = await self.client.connect()
+                except Exception as e:
+                    ok, reason = False, f"connect error: {e}"
+                if ok:
+                    self._fresh_done = True
+                    try:
+                        await self.client.change_account(ACCOUNT_TYPE)
+                        await self.client.get_instruments()
+                    except Exception as e:
+                        raise ConnectionError(f"Quotex setup failed: {e}")
+                    self.connected = True
+                    return
+                await asyncio.sleep(1)
+
+            # both a fresh login and the saved session failed -> clear the
+            # stored session so the next attempt starts clean
             try:
-                Path("session.json").unlink(missing_ok=True)
+                _session_file().unlink(missing_ok=True)
             except Exception:
                 pass
-            try:
-                self.client.session_data = {}
-            except Exception:
-                pass
-            try:
-                check, reason = await self.client.connect()
-            except Exception as e:
-                Path("session.json").unlink(missing_ok=True)
-                raise ConnectionError(f"Quotex connect error: {e}")
-            if not check:
-                Path("session.json").unlink(missing_ok=True)
-                raise ConnectionError(f"Quotex login failed: {reason}")
-            await self.client.change_account(ACCOUNT_TYPE)
-            await self.client.get_instruments()
-            self.connected = True
+            raise ConnectionError(f"Quotex login failed: {reason}")
 
     async def get_markets(self, category):
         """Returns open markets for a category: [{code, display, payout}] sorted by payout desc."""
