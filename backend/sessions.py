@@ -30,8 +30,29 @@ def signal_caption(display, direction, entry_str, reason, payout=0):
     return messages.signal_caption(display, direction, entry_str, payout, reason, OWNER_TAG)
 
 
-def result_caption(display, direction, entry_str, result):
-    return messages.result_caption(display, direction, entry_str, result)
+def result_caption(display, direction, entry_str, result, wins=0, losses=0, total_pct=0.0):
+    return messages.result_caption(display, direction, entry_str, result,
+                                   wins=wins, losses=losses, total_pct=total_pct)
+
+
+def compute_delta(pnl, per_trade_pct, result):
+    """Session P&L change for one signal using the martingale recovery model.
+
+    * first-trade stake S = per_trade_pct when there is no running deficit,
+      otherwise S = 2 x deficit (recover the outstanding loss).
+    * MTG stake M = 2 x (deficit + S)  (double the deficit after a first loss).
+      WIN      -> +S
+      WIN_MTG  -> -S + M
+      LOSS     -> -S - M
+    """
+    deficit = -pnl if pnl < 0 else 0.0
+    s = per_trade_pct if deficit <= 0 else 2 * deficit
+    m = 2 * (deficit + s)
+    if result == "WIN":
+        return s
+    if result == "WIN_MTG":
+        return -s + m
+    return -s - m
 
 
 class SessionManager:
@@ -47,6 +68,7 @@ class SessionManager:
         self.refresh_task = None
         self.signals = []
         self.session_id = None
+        self.pnl = 0.0
         # auto-select mode
         self.auto_mode = False
         self.auto_threshold = 0
@@ -88,6 +110,7 @@ class SessionManager:
         self.channel_title = channel_title
         self.session_id = f"S{int(time.time())}"
         self.signals = []
+        self.pnl = 0.0
         self._sent_entries = set()
         self.auto_mode = auto_mode
         self.auto_threshold = auto_threshold
@@ -311,11 +334,16 @@ class SessionManager:
             result = "WIN_MTG" if (c2 and self._wins(c2, direction)) else "LOSS"
 
         # performance stats for THIS session, including the current result
+        per_trade = float(storage.get_settings().get("per_trade_pct", 1.0))
+        delta = compute_delta(self.pnl, per_trade, result)
+        self.pnl += delta
+
         prior = [s.get("result") for s in self.signals]
         all_res = prior + [result]
         wins = sum(1 for r in all_res if r in ("WIN", "WIN_MTG"))
         losses = sum(1 for r in all_res if r == "LOSS")
-        stats = {"wins": wins, "losses": losses, "total": len(all_res)}
+        stats = {"wins": wins, "losses": losses, "total": len(all_res),
+                 "total_pct": self.pnl}
 
         fresh = await self._candles(market["code"], CHART_CANDLES) or candles
         png = charting.render_chart(
@@ -325,7 +353,8 @@ class SessionManager:
         )
         await NOTIFY.send_photo(
             self.channel_id, png,
-            result_caption(market["display"], direction, entry_str, result),
+            result_caption(market["display"], direction, entry_str, result,
+                           wins=wins, losses=losses, total_pct=self.pnl),
         )
 
         record = {
@@ -337,6 +366,8 @@ class SessionManager:
             "entry": entry_str,
             "entry_ts": entry_ts,
             "result": result,
+            "pnl_delta": delta,
+            "pnl_total": self.pnl,
             "channel_id": self.channel_id,
         }
         self.signals.append(record)
@@ -373,13 +404,14 @@ class SessionManager:
         sigs = self.signals
         if not sigs:
             return None
+        mono = messages.mono
         date_str = datetime.now().strftime("%d.%m. %Y")
         lines = [
-            "=========== PARTIAL ===========",
+            f"=========== {mono('PARTIAL')} ===========",
             PLINE,
-            f"            \U0001f4c5 {date_str}",
+            f"\U0001f4c5 {mono(date_str)}",
             PLINE,
-            f"                  \u2714 Total:{len(sigs)}",
+            f"\u2714 {mono('Total')}:{mono(len(sigs))}",
             PLINE,
         ]
         wins = losses = 0
@@ -389,16 +421,20 @@ class SessionManager:
                 losses += 1
             else:
                 wins += 1
-            lines.append(f"M1 {_partial_asset(s['code'])} {s['entry']} {s['direction']:<4} {mark}")
+            asset = mono(_partial_asset(s["code"]))
+            lines.append(
+                f"{mono('M1')} {asset} {mono(s['entry'])} {mono(s['direction'])} {mark}")
         total = wins + losses
         pct = round(wins / total * 100) if total else 0
+        total_pct = self.pnl
+        tail = mono("GAIN") if total_pct >= 0 else mono("LOSS")
         lines += [
             PLINE,
-            f"\U0001f4e2 Placar: {wins}x{losses} -> ({pct}%)",
+            f"\U0001f525 {mono('Win')}: {mono(wins)} | \u274c {mono('Loss')}: {mono(losses)} "
+            f"| \U0001f916 -> ({mono(pct)}%)",
             PLINE,
-            f"\U0001f525 Win: {wins} | \u274c Loss: {losses} | \U0001f916 -> ({pct}%)",
+            f"\U0001f300 {mono('TOTAL')} : {mono(messages._fmt_pct(total_pct))}% {tail}",
             PLINE,
-            "\U0001f4e9 Partial Sent Successfully",
         ]
         return "\n".join(lines)
 

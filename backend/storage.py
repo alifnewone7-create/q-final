@@ -40,7 +40,7 @@ def remove_channel(chat_id):
     _save(CHANNELS_FILE, channels)
 
 
-DEFAULT_SETTINGS = {"mtg": "MTG-1", "strategy": "classic"}
+DEFAULT_SETTINGS = {"mtg": "MTG-1", "strategy": "classic", "per_trade_pct": 1.0}
 
 
 def get_settings():

@@ -378,6 +378,20 @@ def render_chart(candles, title, badge=None, *, payout=0, entry_ts=None,
                       fontsize=8, fontweight="bold", ha="center", va="center", family=FMONO, zorder=5)
             bx += bw + gap
 
+        # TOTAL profit / loss %
+        total_pct = float((stats or {}).get("total_pct", 0.0))
+        pcol = WIN_COL if total_pct >= 0 else LOSS_COL
+        ptail = "GAIN" if total_pct >= 0 else "LOSS"
+        if abs(total_pct - round(total_pct)) < 0.05:
+            pstr = f"{int(round(total_pct)):+d}"
+        else:
+            pstr = f"{total_pct:+.1f}"
+        _rbox(side, 0.06, 0.135, 0.88, 0.075, PANEL2, pcol, lw=1.6, z=4)
+        side.text(0.12, 0.1725, "TOTAL", transform=side.transAxes, color=DIM, fontsize=10,
+                  fontweight="bold", ha="left", va="center", family=FMONO, zorder=5)
+        side.text(0.90, 0.1725, f"{pstr}%  {ptail}", transform=side.transAxes, color=pcol,
+                  fontsize=14, fontweight="bold", ha="right", va="center", family=FMONO, zorder=5)
+
     # =====================================================================
     #  FOOTER
     # =====================================================================

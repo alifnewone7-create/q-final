@@ -49,7 +49,7 @@ CATEGORY_LABELS = {
 
 # in-memory UI state (single admin bot)
 UI = {"category": None, "markets": [], "page": 0, "selected": {},
-      "auto": None, "auto_cat": None, "await_pct": False}
+      "auto": None, "auto_cat": None, "await_pct": False, "await_pt": False}
 
 
 def is_admin(update: Update) -> bool:
@@ -71,9 +71,32 @@ MAIN_TEXT = "\u2728 TaNix Alpha 2.0 \u2728\n\nSelect an option below:"
 
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Capture custom % value when Auto Select is waiting for it."""
+    """Capture custom % value when Auto Select / Per Trade is waiting for it."""
     if not is_admin(update):
         return
+
+    # Per Trade Percentage custom input
+    if UI.get("await_pt"):
+        txt = (update.message.text or "").strip().replace("%", "").strip()
+        try:
+            pct = round(float(txt), 2)
+        except ValueError:
+            await update.message.reply_text(
+                "\u26a0\ufe0f Please send a number like 1, 1.5 or 2.5.")
+            return
+        if pct < 0.1 or pct > 100:
+            await update.message.reply_text("\u26a0\ufe0f % must be between 0.1 and 100.")
+            return
+        s = storage.get_settings()
+        s["per_trade_pct"] = pct
+        storage.save_settings(s)
+        UI["await_pt"] = False
+        pct_str = f"{int(pct)}%" if float(pct).is_integer() else f"{pct}%"
+        text, kb = per_trade_view()
+        await update.message.reply_text(
+            f"\U0001f4b0 Per Trade Percentage set to {pct_str} \u2705", reply_markup=kb)
+        return
+
     if not UI.get("await_pct"):
         return
     txt = (update.message.text or "").strip().replace("%", "").strip()
@@ -304,15 +327,45 @@ def settings_view():
     s = storage.get_settings()
     mtg = s.get("mtg", "MTG-1")
     st = strategies.get(s.get("strategy", strategies.DEFAULT_KEY))
+    pt = s.get("per_trade_pct", 1.0)
+    pt_str = f"{int(pt)}%" if float(pt).is_integer() else f"{pt}%"
     text = (f"\u2699\ufe0f Settings\n\n"
             f"\U0001f9e0 Strategy: {st['name']}\n"
-            f"\U0001f6e1 MTG mode: {mtg}")
+            f"\U0001f6e1 MTG mode: {mtg}\n"
+            f"\U0001f4b0 Per Trade: {pt_str}")
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("\U0001f9e0 Strategy", callback_data="set|strat")],
         [InlineKeyboardButton("\U0001f6e1 MTG Settings", callback_data="set|mtg")],
+        [InlineKeyboardButton(f"\U0001f4b0 Per Trade Percentage ({pt_str})",
+                              callback_data="set|pt")],
         [InlineKeyboardButton("\u2b05\ufe0f Back", callback_data="m|main")],
     ])
     return text, kb
+
+
+PT_PRESETS = [0.5, 1, 2, 3, 5, 10]
+
+
+def per_trade_view():
+    cur = float(storage.get_settings().get("per_trade_pct", 1.0))
+    cur_str = f"{int(cur)}%" if cur.is_integer() else f"{cur}%"
+    text = ("\U0001f4b0 Per Trade Percentage\n\n"
+            f"Currently set: {cur_str}\n\n"
+            "This is the risk % used per signal. On a loss the next stake\n"
+            "doubles to recover, and MTG doubles again \u2014 the running\n"
+            "GAIN / LOSS % is shown on every result.")
+    rows, row = [], []
+    for p in PT_PRESETS:
+        lbl = f"{int(p)}%" if float(p).is_integer() else f"{p}%"
+        mark = "\u2705 " if abs(p - cur) < 1e-9 else ""
+        row.append(InlineKeyboardButton(mark + lbl, callback_data=f"pt|{p}"))
+        if len(row) == 3:
+            rows.append(row); row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton("\u2328\ufe0f Custom %", callback_data="pt|custom")])
+    rows.append([InlineKeyboardButton("\u2b05\ufe0f Back", callback_data="m|set")])
+    return text, InlineKeyboardMarkup(rows)
 
 
 def strategy_view():
@@ -631,6 +684,38 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer()
         text, kb = strategy_view()
         await q.edit_message_text(text, reply_markup=kb)
+        return
+
+    if data == "set|pt":
+        await q.answer()
+        UI["await_pt"] = False
+        text, kb = per_trade_view()
+        await q.edit_message_text(text, reply_markup=kb)
+        return
+
+    if data == "pt|custom":
+        await q.answer()
+        UI["await_pt"] = True
+        await q.edit_message_text(
+            "\u2328\ufe0f Send the Per Trade Percentage you want (e.g. 1, 1.5, 2.5).\n\n"
+            "Allowed range: 0.1% \u2013 100%.")
+        return
+
+    if data.startswith("pt|"):
+        try:
+            pct = float(data[3:])
+        except ValueError:
+            await q.answer("Invalid value", show_alert=True)
+            return
+        s = storage.get_settings()
+        s["per_trade_pct"] = pct
+        storage.save_settings(s)
+        UI["await_pt"] = False
+        pct_str = f"{int(pct)}%" if pct.is_integer() else f"{pct}%"
+        await q.answer(f"Saved: {pct_str} \u2705")
+        text, kb = per_trade_view()
+        with contextlib.suppress(Exception):
+            await q.edit_message_text(text, reply_markup=kb)
         return
 
     if data.startswith("sti|"):
