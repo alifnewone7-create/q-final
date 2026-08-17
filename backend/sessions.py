@@ -285,7 +285,11 @@ class SessionManager:
 
         # chart includes the live RUNNING candle from tick data
         candles = await self._candles(market["code"], CHART_CANDLES)
-        png = charting.render_chart(candles, f"{market['display']}  \u00b7  M1", badge=direction)
+        png = charting.render_chart(
+            candles, f"{market['display']}  \u00b7  M1", badge=direction,
+            payout=market.get("payout", 0), entry_ts=entry_ts, entry_str=entry_str,
+            market_name=market["display"], result=None,
+        )
         await NOTIFY.send_photo(
             self.channel_id, png,
             signal_caption(market["display"], direction, entry_str, res["reason"],
@@ -306,8 +310,19 @@ class SessionManager:
             c2 = await self._get_candle(market["code"], entry_ts + 60)
             result = "WIN_MTG" if (c2 and self._wins(c2, direction)) else "LOSS"
 
+        # performance stats for THIS session, including the current result
+        prior = [s.get("result") for s in self.signals]
+        all_res = prior + [result]
+        wins = sum(1 for r in all_res if r in ("WIN", "WIN_MTG"))
+        losses = sum(1 for r in all_res if r == "LOSS")
+        stats = {"wins": wins, "losses": losses, "total": len(all_res)}
+
         fresh = await self._candles(market["code"], CHART_CANDLES) or candles
-        png = charting.render_chart(fresh, f"{market['display']}  \u00b7  M1", badge=direction)
+        png = charting.render_chart(
+            fresh, f"{market['display']}  \u00b7  M1", badge=direction,
+            payout=market.get("payout", 0), entry_ts=entry_ts, entry_str=entry_str,
+            market_name=market["display"], result=result, stats=stats,
+        )
         await NOTIFY.send_photo(
             self.channel_id, png,
             result_caption(market["display"], direction, entry_str, result),

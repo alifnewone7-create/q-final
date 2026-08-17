@@ -1,10 +1,14 @@
-"""Chart-X style multi-panel candlestick chart PNG generator.
+"""TaNix Alpha 2.0 — professional HUD-style candlestick chart PNG generator.
 
-Layout (top -> bottom):
-    * Main price panel (candles + EMA20 + Bollinger Bands + trend lines + zones + R/P/S labels + 1M timer)
-    * Volume histogram (VOL MA14)
-    * RSI(7) oscillator with 25 / 75 guide lines
-    * MACD (5, 13, 5) histogram + signal
+A clean trading dashboard image sent to Telegram:
+    * Top header bar  : logo + brand + market name/OTC | big CALL/PUT badge |
+                        payout % + signal time (UTC+6)
+    * Main price panel: candles + 3 MA lines + shaded band + ENTRY arrow +
+                        last-price tag  (+ WIN/LOSS ribbon on the result image)
+    * Volume panel    : coloured volume bars
+    * Right panel     : SIGNAL DETAILS (CALL/PUT, Entry Time, Market, Martingale)
+                        and, on the result image, RESULT + PERFORMANCE stats
+    * Footer          : Developed by @iamhear1
 """
 import io
 import time
@@ -14,32 +18,35 @@ from datetime import datetime, timezone, timedelta
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle, FancyBboxPatch
+from matplotlib.patches import Rectangle, FancyBboxPatch, RegularPolygon
 from matplotlib.gridspec import GridSpec
-from matplotlib import patheffects as pe
 
-# ---- palette (Chart-X dark) ----------------------------------------------
-BG            = "#000000"
-GRID          = "#101820"
-BORDER        = "#1e2a38"
-TEXT          = "#c9d4e3"
-DIM           = "#6b7a8a"
-UP            = "#00e676"
-DOWN          = "#ff2e4d"
-EMA_COL       = "#26c6da"
-BB_COL        = "#e0e0e0"
-TREND_COL     = "#e0b060"
-ZONE_R        = "#3a0d15"   # resistance zone (dark red)
-ZONE_S        = "#0d3a1c"   # support zone (dark green)
-R_LINE        = "#8b1b28"
-S_LINE        = "#1e6b3a"
-MACD_UP       = "#26c6da"
-MACD_DN       = "#ff2e4d"
-MACD_SIG      = "#ffb74d"
-RSI_COL       = "#e0b060"
-WM_COL        = "#1a4a2e"
+# ---- palette -------------------------------------------------------------
+BG        = "#070b13"      # page background
+PANEL     = "#0b1220"      # panel fill
+PANEL2    = "#0e1727"      # inner box fill
+BORDER    = "#1c2b40"      # subtle borders
+GRID      = "#111c2b"
+TEXT      = "#d7e2f0"
+DIM       = "#7c8ba1"
+FAINT     = "#4a5a70"
 
-FONT_MONO     = {"family": "DejaVu Sans Mono"}
+UP        = "#16c784"      # bullish candle / CALL
+DOWN      = "#ea3943"      # bearish candle / PUT
+CALL_COL  = "#16c784"
+PUT_COL   = "#ea3943"
+
+MA_FAST   = "#f5c542"      # yellow
+MA_MID    = "#22d3ee"      # cyan
+MA_SLOW   = "#a78bfa"      # purple
+BAND_COL  = "#16324a"      # shaded band
+ACCENT    = "#22d3ee"      # cyan accent
+WIN_COL   = "#16c784"
+MTG_COL   = "#3b82f6"
+LOSS_COL  = "#ea3943"
+
+FMONO = "DejaVu Sans Mono"
+FSANS = "DejaVu Sans"
 
 
 # ---- indicator helpers ---------------------------------------------------
@@ -60,7 +67,7 @@ def _sma(values, period):
         if i + 1 < period:
             out.append(None)
         else:
-            out.append(sum(values[i + 1 - period : i + 1]) / period)
+            out.append(sum(values[i + 1 - period:i + 1]) / period)
     return out
 
 
@@ -70,374 +77,315 @@ def _stdev(values, period):
         if i + 1 < period:
             out.append(None)
             continue
-        window = values[i + 1 - period : i + 1]
-        m = sum(window) / period
-        var = sum((x - m) ** 2 for x in window) / period
+        w = values[i + 1 - period:i + 1]
+        m = sum(w) / period
+        var = sum((x - m) ** 2 for x in w) / period
         out.append(math.sqrt(var))
     return out
 
 
-def _rsi(values, period=7):
-    if len(values) < period + 1:
-        return [None] * len(values)
-    gains, losses = [], []
-    for i in range(1, len(values)):
-        d = values[i] - values[i - 1]
-        gains.append(max(d, 0.0))
-        losses.append(max(-d, 0.0))
-    out = [None] * (period)
-    avg_g = sum(gains[:period]) / period
-    avg_l = sum(losses[:period]) / period
-    rs = avg_g / avg_l if avg_l else 0.0
-    out.append(100 - 100 / (1 + rs) if avg_l else 100.0)
-    for i in range(period, len(gains)):
-        avg_g = (avg_g * (period - 1) + gains[i]) / period
-        avg_l = (avg_l * (period - 1) + losses[i]) / period
-        rs = avg_g / avg_l if avg_l else 0.0
-        out.append(100 - 100 / (1 + rs) if avg_l else 100.0)
-    return out
+def _result_label(result):
+    return {"WIN": "WIN", "WIN_MTG": "MTG WIN", "LOSS": "LOSS"}.get(result, str(result))
 
 
-def _macd(closes, fast=5, slow=13, signal=5):
-    if len(closes) < slow + signal:
-        n = len(closes)
-        return [None] * n, [None] * n, [None] * n
-    ef = _ema(closes, fast)
-    es = _ema(closes, slow)
-    macd_line = [a - b for a, b in zip(ef, es)]
-    sig_line = _ema(macd_line, signal)
-    hist = [m - s for m, s in zip(macd_line, sig_line)]
-    return macd_line, sig_line, hist
+def _result_color(result):
+    if result == "WIN":
+        return WIN_COL
+    if result == "WIN_MTG":
+        return MTG_COL
+    return LOSS_COL
 
 
-# ---- pattern detection (compact one-word tags) --------------------------
+# ---- small drawing helpers (axis-coordinate rounded boxes) ---------------
 
-def _classify(c, prev=None):
-    """Return short pattern tag or None."""
-    o, h, l, cl = c["open"], c["high"], c["low"], c["close"]
-    rng = h - l
-    if rng <= 0:
-        return None
-    body = abs(cl - o)
-    up_wick = h - max(o, cl)
-    lo_wick = min(o, cl) - l
-    body_pct = body / rng
-    # doji
-    if body_pct < 0.10:
-        return "DOJI"
-    # marubozu (full body)
-    if body_pct > 0.85:
-        return "MARU"
-    # spinning top
-    if body_pct < 0.35 and up_wick > body and lo_wick > body:
-        return "SPIN"
-    # engulfing vs prev
-    if prev is not None:
-        p_o, p_c = prev["open"], prev["close"]
-        p_body = abs(p_c - p_o)
-        if body > p_body * 1.2:
-            bull = cl > o and p_c < p_o and cl > p_o and o < p_c
-            bear = cl < o and p_c > p_o and cl < p_o and o > p_c
-            if bull or bear:
-                return "BENG"
-    return None
+def _rbox(ax, x, y, w, h, fc, ec, lw=1.0, alpha=1.0, pad=0.008, z=3):
+    ax.add_patch(FancyBboxPatch(
+        (x, y), w, h, transform=ax.transAxes,
+        boxstyle=f"round,pad={pad},rounding_size=0.02",
+        facecolor=fc, edgecolor=ec, linewidth=lw, alpha=alpha,
+        mutation_aspect=0.6, clip_on=False, zorder=z,
+    ))
 
 
 # ---- main render ---------------------------------------------------------
 
-def render_chart(candles, title, badge=None):
-    """candles: list[dict(time,open,high,low,close[,volume])]. Returns PNG bytes."""
-    data = candles[-90:] if len(candles) >= 20 else list(candles)
+def render_chart(candles, title, badge=None, *, payout=0, entry_ts=None,
+                 entry_str=None, market_name=None, result=None, stats=None):
+    """Render the dashboard PNG and return raw bytes.
+
+    badge        : "CALL" / "PUT"  (the signal direction)
+    payout       : int payout %
+    entry_ts     : unix ts of the entry candle (used to place the ENTRY arrow)
+    entry_str    : "HH:MM" entry time
+    market_name  : market display name (falls back to `title`)
+    result       : None (signal image) or "WIN" / "WIN_MTG" / "LOSS"
+    stats        : dict(wins=, losses=, total=)  -> shown on the result image
+    """
+    direction = (badge or "").upper() if badge in ("CALL", "PUT") else (badge or "")
+    if market_name is None:
+        market_name = title.split("\u00b7")[0].strip() if title else ""
+    if entry_str is None and entry_ts:
+        entry_str = time.strftime("%H:%M", time.localtime(entry_ts))
+    is_result = result is not None
+
+    data = candles[-70:] if len(candles) >= 20 else list(candles)
     n = len(data)
+
+    fig = plt.figure(figsize=(15.5, 8.6), dpi=110, facecolor=BG)
+    # main chart + volume on the left, info panel on the right
+    gs = GridSpec(2, 2, figure=fig, width_ratios=[3.05, 1.0],
+                  height_ratios=[8.2, 1.7], wspace=0.03, hspace=0.05,
+                  left=0.018, right=0.985, top=0.885, bottom=0.075)
+    ax = fig.add_subplot(gs[0, 0]); ax.set_facecolor(PANEL)
+    axv = fig.add_subplot(gs[1, 0], sharex=ax); axv.set_facecolor(PANEL)
+    side = fig.add_subplot(gs[:, 1]); side.set_facecolor(PANEL)
+    side.set_xticks([]); side.set_yticks([]); side.set_xlim(0, 1); side.set_ylim(0, 1)
+
+    for a in (ax, axv, side):
+        for s in a.spines.values():
+            s.set_color(BORDER); s.set_linewidth(1.0)
+
     if n < 2:
-        # tiny fallback so caller never crashes
-        fig, ax = plt.subplots(figsize=(12, 7), facecolor=BG)
-        ax.set_facecolor(BG)
-        ax.text(0.5, 0.5, "Insufficient data", color=TEXT, ha="center", va="center")
+        ax.text(0.5, 0.5, "Insufficient data", color=DIM, ha="center", va="center",
+                transform=ax.transAxes, family=FMONO)
         buf = io.BytesIO()
-        fig.savefig(buf, format="png", facecolor=BG)
-        plt.close(fig)
+        fig.savefig(buf, format="png", facecolor=BG); plt.close(fig)
         return buf.getvalue()
 
-    opens  = [c["open"]  for c in data]
-    highs  = [c["high"]  for c in data]
-    lows   = [c["low"]   for c in data]
+    opens = [c["open"] for c in data]
+    highs = [c["high"] for c in data]
+    lows = [c["low"] for c in data]
     closes = [c["close"] for c in data]
-    vols   = [c.get("volume", abs(c["close"] - c["open"]) * 1e6) for c in data]
+    vols = [c.get("volume", abs(c["close"] - c["open"]) * 1e6) for c in data]
 
-    # indicators
-    ema20 = _ema(closes, 20)
+    span = (max(highs) - min(lows)) or 1e-9
+
+    # ---- MA lines + shaded band ----------------------------------------
+    ema_f = _ema(closes, 5)
+    ema_m = _ema(closes, 13)
+    ema_s = _ema(closes, 34)
     bb_mid = _sma(closes, 20)
-    bb_sd  = _stdev(closes, 20)
-    bb_up  = [(m + 2 * s) if (m is not None and s is not None) else None
-              for m, s in zip(bb_mid, bb_sd)]
-    bb_lo  = [(m - 2 * s) if (m is not None and s is not None) else None
-              for m, s in zip(bb_mid, bb_sd)]
-    rsi_v  = _rsi(closes, 7)
-    macd_l, sig_l, hist = _macd(closes, 5, 13, 5)
-    vol_ma14 = _sma(vols, 14)
+    bb_sd = _stdev(closes, 20)
+    bb_up = [(m + 2 * s) if m is not None and s is not None else None
+             for m, s in zip(bb_mid, bb_sd)]
+    bb_lo = [(m - 2 * s) if m is not None and s is not None else None
+             for m, s in zip(bb_mid, bb_sd)]
 
-    # figure + grid
-    fig = plt.figure(figsize=(16, 9), dpi=110, facecolor=BG)
-    gs = GridSpec(4, 1, figure=fig, height_ratios=[10, 2.2, 2.0, 2.0],
-                  hspace=0.09, left=0.028, right=0.938, top=0.865, bottom=0.055)
-    ax  = fig.add_subplot(gs[0]); ax.set_facecolor(BG)
-    axv = fig.add_subplot(gs[1], sharex=ax); axv.set_facecolor(BG)
-    axr = fig.add_subplot(gs[2], sharex=ax); axr.set_facecolor(BG)
-    axm = fig.add_subplot(gs[3], sharex=ax); axm.set_facecolor(BG)
-
-    for a in (ax, axv, axr, axm):
-        for s in a.spines.values():
-            s.set_color(BORDER); s.set_linewidth(0.6)
-        a.tick_params(colors=DIM, labelsize=9, length=0)
-        a.grid(color=GRID, linewidth=0.5, alpha=0.9)
-        a.yaxis.tick_right(); a.yaxis.set_label_position("right")
-
-    # ---- price zones (support/resistance bands) --------------------------
-    span = max(highs) - min(lows) or 1e-9
-    lo_ref = min(lows); hi_ref = max(highs)
-    # 4 red bands on top half, 3 green bands on bottom
-    for i in range(4):
-        y0 = hi_ref - span * 0.10 * i
-        ax.axhspan(y0 - span * 0.008, y0, facecolor=ZONE_R, alpha=0.55, zorder=0)
-        ax.axhline(y0, color=R_LINE, linewidth=0.6, alpha=0.7, zorder=0)
-    for i in range(3):
-        y0 = lo_ref + span * 0.06 * i
-        ax.axhspan(y0, y0 + span * 0.010, facecolor=ZONE_S, alpha=0.55, zorder=0)
-        ax.axhline(y0, color=S_LINE, linewidth=0.6, alpha=0.7, zorder=0)
-
-    # ---- diagonal trend channel -----------------------------------------
-    try:
-        # upper channel: connect two swing highs; lower channel: two swing lows
-        i_h1 = max(range(min(10, n)), key=lambda i: highs[i])
-        i_h2 = min(range(max(0, n - 10), n), key=lambda i: -highs[i])
-        i_l1 = max(range(min(10, n)), key=lambda i: -lows[i])
-        i_l2 = min(range(max(0, n - 10), n), key=lambda i: lows[i])
-        if i_h2 > i_h1:
-            slope = (highs[i_h2] - highs[i_h1]) / (i_h2 - i_h1)
-            xs = [-2, n + 4]
-            ys = [highs[i_h1] + slope * (x - i_h1) for x in xs]
-            ax.plot(xs, ys, color=TREND_COL, linewidth=0.8, alpha=0.9, zorder=1)
-            ys2 = [y - span * 0.05 for y in ys]
-            ax.plot(xs, ys2, color=TREND_COL, linewidth=0.6, alpha=0.6, zorder=1)
-        if i_l2 > i_l1:
-            slope = (lows[i_l2] - lows[i_l1]) / (i_l2 - i_l1)
-            xs = [-2, n + 4]
-            ys = [lows[i_l1] + slope * (x - i_l1) for x in xs]
-            ax.plot(xs, ys, color=TREND_COL, linewidth=0.8, alpha=0.9, zorder=1)
-    except Exception:
-        pass
-
-    # ---- Bollinger Bands ------------------------------------------------
-    xs_bb = list(range(n))
-    xs_v = [x for x, v in zip(xs_bb, bb_up) if v is not None]
-    if xs_v:
-        ax.plot(xs_v, [bb_up[x] for x in xs_v], color=BB_COL, linewidth=0.5, alpha=0.7, zorder=2)
-        ax.plot(xs_v, [bb_lo[x] for x in xs_v], color=BB_COL, linewidth=0.5, alpha=0.7, zorder=2)
-        ax.plot(xs_v, [bb_mid[x] for x in xs_v], color=BB_COL, linewidth=0.4, alpha=0.35,
-                linestyle=(0, (2, 2)), zorder=2)
-
-    # ---- EMA20 ----------------------------------------------------------
-    ax.plot(xs_bb, ema20, color=EMA_COL, linewidth=1.2, alpha=0.95, zorder=3)
+    xs = list(range(n))
+    valid = [i for i in xs if bb_up[i] is not None]
+    if valid:
+        ax.fill_between(valid, [bb_lo[i] for i in valid], [bb_up[i] for i in valid],
+                        color=BAND_COL, alpha=0.45, zorder=1, linewidth=0)
+    ax.grid(color=GRID, linewidth=0.6, alpha=0.8)
+    ax.plot(xs, ema_s, color=MA_SLOW, linewidth=1.4, alpha=0.9, zorder=3)
+    ax.plot(xs, ema_m, color=MA_MID, linewidth=1.4, alpha=0.95, zorder=3)
+    ax.plot(xs, ema_f, color=MA_FAST, linewidth=1.6, alpha=0.95, zorder=4)
 
     # ---- candles --------------------------------------------------------
     tiny = span * 0.0015
-    prev = None
-    labels_placed = []  # (x, y) to avoid overlap
     for i, c in enumerate(data):
         up = c["close"] >= c["open"]
         col = UP if up else DOWN
-        ax.vlines(i, c["low"], c["high"], color=col, linewidth=1.0, zorder=4)
-        body_h = abs(c["close"] - c["open"]) or tiny
-        ax.add_patch(Rectangle(
-            (i - 0.34, min(c["open"], c["close"])), 0.68, body_h,
-            facecolor=col, edgecolor=col, linewidth=0.5, zorder=5,
-        ))
-        # sparse pattern label (skip near last candle when a badge is shown)
-        tag = _classify(c, prev)
-        near_badge = badge and (n - 1 - i) < 3
-        if tag and (i % 4 == 0 or i == n - 1) and not near_badge:
-            y = c["high"] + span * 0.015
-            if not any(abs(px - i) < 3 for px, _ in labels_placed):
-                ax.text(i, y, tag, color="#e8f5e9", fontsize=8, ha="center", va="bottom",
-                        fontweight="bold", family="DejaVu Sans Mono",
-                        bbox=dict(boxstyle="round,pad=0.22", facecolor="#0d3a1c",
-                                  edgecolor=S_LINE, linewidth=0.6))
-                labels_placed.append((i, y))
-        prev = c
+        ax.vlines(i, c["low"], c["high"], color=col, linewidth=1.1, zorder=5)
+        body = abs(c["close"] - c["open"]) or tiny
+        ax.add_patch(Rectangle((i - 0.32, min(c["open"], c["close"])), 0.64, body,
+                     facecolor=col, edgecolor=col, linewidth=0.6, zorder=6))
 
-    # ---- last candle badge (WIN / signal) ------------------------------
-    last = data[-1]
-    last_col = UP if last["close"] >= last["open"] else DOWN
-    ax.annotate(
-        "", xy=(n - 1, last["close"]), xytext=(n - 1 - 2, last["close"] + span * 0.02),
-        arrowprops=dict(arrowstyle="-", color=last_col, lw=0.6, alpha=0.8),
-    )
-    if badge in ("CALL", "PUT"):
-        badge_col = UP if badge == "CALL" else DOWN
-        ax.text(n - 0.5, last["high"] + span * 0.03, badge, color="#ffffff",
-                fontsize=10, fontweight="bold", ha="center", va="bottom",
-                family="DejaVu Sans Mono",
-                bbox=dict(boxstyle="round,pad=0.28", facecolor=badge_col,
-                          edgecolor=badge_col, linewidth=0))
-    elif badge:
-        # WIN / LOSS style
-        b_col = UP if str(badge).upper().startswith("WIN") else DOWN
-        ax.text(n - 0.5, last["high"] + span * 0.03, badge, color="#ffffff",
-                fontsize=10, fontweight="bold", ha="center", va="bottom",
-                family="DejaVu Sans Mono",
-                bbox=dict(boxstyle="round,pad=0.28", facecolor=b_col,
-                          edgecolor=b_col, linewidth=0))
+    # ---- ENTRY arrow ----------------------------------------------------
+    entry_x = None
+    if entry_ts is not None:
+        for i, c in enumerate(data):
+            if int(c["time"]) == int(entry_ts):
+                entry_x = i
+                break
+        if entry_x is None and entry_ts > data[-1]["time"]:
+            entry_x = n  # upcoming candle (signal image)
+    if entry_x is not None:
+        ref_price = closes[-1]
+        y_arrow = ref_price + span * 0.13
+        # guide line down to the price zone + a bold arrow marker
+        ax.vlines(entry_x, ref_price, y_arrow, color=ACCENT, linewidth=0.8,
+                  alpha=0.6, linestyle=(0, (3, 2)), zorder=8)
+        ax.add_patch(RegularPolygon((entry_x, y_arrow), numVertices=3, radius=span * 0.038,
+                     orientation=math.pi, facecolor=ACCENT, edgecolor="#04121b",
+                     linewidth=0.8, zorder=9))
+        ax.text(entry_x, y_arrow + span * 0.055, "ENTRY", color=ACCENT, fontsize=9.5,
+                fontweight="bold", ha="center", va="bottom", family=FMONO, zorder=9,
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="#04121b",
+                          edgecolor=ACCENT, linewidth=0.8))
 
-    # ---- right side R / P / S price tags -------------------------------
-    r_price = max(highs[-30:]) if n >= 5 else max(highs)
-    s_price = min(lows[-30:])  if n >= 5 else min(lows)
-    p_price = last["close"]
-    # keep R above P and S below P visually so labels don't overlap
-    gap = span * 0.06
-    if r_price - p_price < gap:
-        r_price = p_price + gap
-    if p_price - s_price < gap:
-        s_price = p_price - gap
-    x_tag = n + 0.6
+    # ---- last price tag -------------------------------------------------
+    last_price = closes[-1]
+    ax.text(n + 0.4, last_price, f" {last_price:.5f} ", color="#04121b", fontsize=10,
+            fontweight="bold", ha="left", va="center", family=FMONO, zorder=11,
+            bbox=dict(boxstyle="round,pad=0.32", facecolor=ACCENT, edgecolor="none"),
+            clip_on=False)
+    ax.axhline(last_price, color=ACCENT, linewidth=0.6, alpha=0.5,
+               linestyle=(0, (4, 3)), zorder=2)
 
-    def _pricetag(y, label, bg):
-        ax.plot([n - 0.5, x_tag - 0.05], [y, y], color=bg, linewidth=0.5, alpha=0.9, zorder=4)
-        ax.text(x_tag, y, f" {label} {y:.4f} ", color="#ffffff", fontsize=9.5,
-                fontweight="bold", ha="left", va="center", family="DejaVu Sans Mono",
-                bbox=dict(boxstyle="round,pad=0.30", facecolor=bg, edgecolor=bg, linewidth=0),
-                clip_on=False, zorder=10)
+    # ---- result ribbon (top-right of chart) -----------------------------
+    if is_result:
+        rc = _result_color(result)
+        ax.text(0.985, 0.955, _result_label(result), transform=ax.transAxes,
+                color="#04121b", fontsize=13, fontweight="bold", ha="right", va="center",
+                family=FMONO, rotation=0, zorder=12,
+                bbox=dict(boxstyle="round,pad=0.45", facecolor=rc, edgecolor="none"))
 
-    _pricetag(r_price, "R", "#b02234")
-    _pricetag(p_price, "P", "#1f6feb")
-    _pricetag(s_price, "S", "#1e7d3a")
-
-    # ---- 1M timer box (positioned to the right of P tag) ----------------
-    now = int(time.time())
-    remaining = 60 - (now % 60)
-    ax.text(x_tag + 7.5, p_price, f" 1M TIMER \n   00:{remaining:02d}   ",
-            color=EMA_COL, fontsize=10.5, fontweight="bold", ha="left", va="center",
-            family="DejaVu Sans Mono",
-            bbox=dict(boxstyle="round,pad=0.35", facecolor="#001318",
-                      edgecolor=EMA_COL, linewidth=1.0),
-            clip_on=False, zorder=11)
-
-    # ---- watermark ------------------------------------------------------
-    ax.text(0.5, 0.5, "TaNix Alpha 2.0", transform=ax.transAxes, color=WM_COL,
-            fontsize=52, fontweight="bold", alpha=0.55, ha="center", va="center",
-            zorder=0, family="DejaVu Sans")
-
-    # ---- main axis limits + x labels ------------------------------------
-    ax.set_xlim(-1.5, n + 22)
-    pad = span * 0.12
+    # axis limits / ticks
+    ax.set_xlim(-1.2, n + 6)
+    pad = span * 0.16
     ax.set_ylim(min(lows) - pad, max(highs) + pad)
     ax.set_xticks([])
+    ax.tick_params(colors=DIM, labelsize=9, length=0)
+    ax.yaxis.tick_right(); ax.yaxis.set_label_position("right")
 
     # ---- volume ---------------------------------------------------------
     vmax = max(vols) or 1
     for i, c in enumerate(data):
         col = UP if c["close"] >= c["open"] else DOWN
-        axv.bar(i, vols[i], color=col, width=0.75, alpha=0.85, edgecolor=col, linewidth=0)
-    xs_vm = [i for i, v in enumerate(vol_ma14) if v is not None]
-    if xs_vm:
-        axv.plot(xs_vm, [vol_ma14[i] for i in xs_vm], color=TREND_COL, linewidth=0.8, alpha=0.9)
+        axv.bar(i, vols[i], color=col, width=0.7, alpha=0.75, linewidth=0)
     axv.set_ylim(0, vmax * 1.15)
-    axv.set_xticks([])
-    axv.text(0.005, 0.85, "VOL   MA14", transform=axv.transAxes, color=DIM, fontsize=9,
-             fontweight="bold", family="DejaVu Sans Mono")
-    axv.text(0.005, 0.50, str(int(vols[-1])) if vols[-1] < 10000 else f"{int(vols[-1])}",
-             transform=axv.transAxes, color=TEXT, fontsize=8.5, family="DejaVu Sans Mono")
-
-    # ---- RSI ------------------------------------------------------------
-    xs_r = [i for i, v in enumerate(rsi_v) if v is not None]
-    if xs_r:
-        axr.plot(xs_r, [rsi_v[i] for i in xs_r], color=RSI_COL, linewidth=0.9)
-    axr.axhline(75, color=DIM, linewidth=0.5, linestyle=(0, (2, 2)), alpha=0.7)
-    axr.axhline(25, color=DIM, linewidth=0.5, linestyle=(0, (2, 2)), alpha=0.7)
-    axr.set_ylim(0, 100)
-    axr.set_yticks([25, 75])
-    axr.set_xticks([])
-    axr.text(0.005, 0.82, f"RSI7   {rsi_v[-1]:.1f}" if rsi_v[-1] is not None else "RSI7",
-             transform=axr.transAxes, color=DIM, fontsize=9,
-             fontweight="bold", family="DejaVu Sans Mono")
-
-    # ---- MACD -----------------------------------------------------------
-    for i, h in enumerate(hist):
-        if h is None:
-            continue
-        col = MACD_UP if h >= 0 else MACD_DN
-        axm.bar(i, h, color=col, width=0.75, alpha=0.85, edgecolor=col, linewidth=0)
-    xs_m = [i for i, v in enumerate(macd_l) if v is not None]
-    if xs_m:
-        axm.plot(xs_m, [macd_l[i] for i in xs_m], color=EMA_COL, linewidth=0.9)
-        axm.plot(xs_m, [sig_l[i]  for i in xs_m], color=MACD_SIG, linewidth=0.9)
-    axm.axhline(0, color=DIM, linewidth=0.4, alpha=0.6)
-    axm.text(0.005, 0.86, "MACD  5/13/5", transform=axm.transAxes, color=DIM, fontsize=9,
-             fontweight="bold", family="DejaVu Sans Mono")
-    axm.text(0.005, 0.62, "MACD  SIGNAL", transform=axm.transAxes, color=DIM, fontsize=8,
-             family="DejaVu Sans Mono")
-
-    # ---- bottom time axis ----------------------------------------------
-    step = max(1, n // 12)
+    axv.grid(color=GRID, linewidth=0.5, alpha=0.7, axis="y")
+    axv.set_yticks([])
+    axv.tick_params(colors=DIM, labelsize=8, length=0)
+    step = max(1, n // 8)
     ticks = list(range(0, n, step))
-    axm.set_xticks(ticks)
-    axm.set_xticklabels(
+    axv.set_xticks(ticks)
+    axv.set_xticklabels(
         [time.strftime("%H:%M", time.localtime(data[i]["time"])) for i in ticks],
-        color=DIM, fontsize=9, family="DejaVu Sans Mono",
-    )
+        color=DIM, fontsize=8.5, family=FMONO)
 
-    # ---- headers overlay (drawn in figure coords) -----------------------
-    # symbol title
-    sym = title.split("·")[0].strip() if title else ""
-    fig.text(0.028, 0.955, sym.upper(), color="#e6f7ff", fontsize=20,
-             fontweight="bold", family="DejaVu Sans Mono",
-             path_effects=[pe.withStroke(linewidth=0.4, foreground="#00343d")])
-    fig.text(0.028, 0.923, "CANDLE VIEW", color=DIM, fontsize=9.5,
-             fontweight="bold", family="DejaVu Sans Mono")
-
-    # right-side timestamp box
-    utc_off = 6
-    now_dt = datetime.now(timezone.utc) + timedelta(hours=utc_off)
-    ts = now_dt.strftime("%Y-%m-%d %H:%M") + f" UTC+{utc_off}"
+    # =====================================================================
+    #  HEADER  (figure coordinates)
+    # =====================================================================
     fig.patches.append(FancyBboxPatch(
-        (0.795, 0.94), 0.163, 0.032, transform=fig.transFigure,
-        boxstyle="round,pad=0.004", linewidth=0.7,
-        edgecolor=BORDER, facecolor="#000000",
-    ))
-    fig.text(0.877, 0.956, ts, color=TEXT, fontsize=9.5, ha="center", va="center",
-             family="DejaVu Sans Mono", fontweight="bold")
+        (0.018, 0.905), 0.967, 0.078, transform=fig.transFigure,
+        boxstyle="round,pad=0.004,rounding_size=0.01",
+        facecolor=PANEL, edgecolor=BORDER, linewidth=1.2))
 
-    # info bar
-    trend_char = "UP \u25b2" if closes[-1] > closes[-5] else "DOWN \u25bc"
-    trend_col = UP if closes[-1] > closes[-5] else DOWN
-    info_parts = [
-        ("TF: M1",   TEXT),
-        (trend_char, trend_col),
-        ("EMA20 FLAT", TEXT),
-        ("PAT B",    TEXT),
-        ("VOL MA14", TEXT),
-        ("BB20",     TEXT),
-        ("RSI7",     TEXT),
-        ("MACD",     TEXT),
-    ]
+    # -- left: logo icon + brand
+    fig.patches.append(RegularPolygon(
+        (0.034, 0.945), numVertices=6, radius=0.015, orientation=0,
+        transform=fig.transFigure, facecolor="none", edgecolor=ACCENT, linewidth=1.6))
+    fig.patches.append(RegularPolygon(
+        (0.034, 0.945), numVertices=6, radius=0.0065, orientation=0,
+        transform=fig.transFigure, facecolor=ACCENT, edgecolor="none"))
+    fig.text(0.050, 0.945, "TaNix", color=TEXT, fontsize=16, fontweight="bold",
+             va="center", ha="left", family=FSANS)
+    fig.text(0.098, 0.945, "Alpha 2.0", color=ACCENT, fontsize=16, fontweight="bold",
+             va="center", ha="left", family=FSANS)
+
+    # AI - V3 pill
     fig.patches.append(FancyBboxPatch(
-        (0.028, 0.878), 0.60, 0.034, transform=fig.transFigure,
-        boxstyle="round,pad=0.003", linewidth=0.6,
-        edgecolor=BORDER, facecolor="#000000",
-    ))
-    x_cursor = 0.040
-    for i, (txt, col) in enumerate(info_parts):
-        fig.text(x_cursor, 0.895, txt, color=col, fontsize=9, va="center",
-                 fontweight="bold", family="DejaVu Sans Mono")
-        x_cursor += 0.070
-        if i < len(info_parts) - 1:
-            fig.text(x_cursor - 0.008, 0.895, "|", color=DIM, fontsize=9, va="center",
-                     family="DejaVu Sans Mono")
+        (0.176, 0.933), 0.040, 0.024, transform=fig.transFigure,
+        boxstyle="round,pad=0.003,rounding_size=0.02",
+        facecolor=PANEL2, edgecolor=BORDER, linewidth=1.0))
+    fig.text(0.196, 0.945, "AI \u00b7 V3", color=DIM, fontsize=8.5, fontweight="bold",
+             ha="center", va="center", family=FMONO)
 
-    # (developer stamp removed per user request)
+    # market name (without the (OTC) suffix) + OTC/REAL pill
+    clean_name = (market_name.replace("(OTC)", "").replace("(otc)", "")
+                  .replace("(OTC", "").strip())
+    fig.text(0.234, 0.945, clean_name.upper(), color=TEXT, fontsize=13.5,
+             fontweight="bold", va="center", ha="left", family=FMONO)
+    otc = "OTC" if "otc" in market_name.lower() else "REAL"
+    pill_x = 0.234 + 0.0093 * len(clean_name) + 0.010
+    fig.patches.append(FancyBboxPatch(
+        (pill_x, 0.934), 0.034, 0.022, transform=fig.transFigure,
+        boxstyle="round,pad=0.003,rounding_size=0.02",
+        facecolor="#3a2a08", edgecolor="#a97b12", linewidth=1.0))
+    fig.text(pill_x + 0.017, 0.945, otc, color="#f0b429",
+             fontsize=8.5, fontweight="bold", ha="center", va="center", family=FMONO)
+
+    # -- center: big CALL/PUT badge (no confidence)
+    d_col = CALL_COL if direction == "CALL" else PUT_COL
+    tri = "\u25b2" if direction == "CALL" else "\u25bc"
+    fig.patches.append(FancyBboxPatch(
+        (0.437, 0.918), 0.13, 0.05, transform=fig.transFigure,
+        boxstyle="round,pad=0.004,rounding_size=0.02",
+        facecolor=PANEL2, edgecolor=d_col, linewidth=1.8))
+    fig.text(0.502, 0.943, f"{tri}  {direction}", color=d_col, fontsize=18,
+             fontweight="bold", ha="center", va="center", family=FMONO)
+
+    # -- right: payout + signal time (UTC+6)
+    fig.text(0.982, 0.958, f"Payout  {int(payout)}%", color="#f0b429", fontsize=12.5,
+             fontweight="bold", ha="right", va="center", family=FMONO)
+    st = entry_str or time.strftime("%H:%M", time.localtime())
+    fig.text(0.982, 0.930, f"Signal Time  {st} (UTC+6)", color=DIM, fontsize=10.5,
+             fontweight="bold", ha="right", va="center", family=FMONO)
+
+    # =====================================================================
+    #  RIGHT PANEL  (side axis, 0..1 coords)
+    # =====================================================================
+    def stitle(y, txt, col=ACCENT):
+        side.plot([0.06, 0.10], [y, y], color=col, linewidth=3, transform=side.transAxes,
+                  solid_capstyle="round", zorder=5)
+        side.text(0.5, y, txt, transform=side.transAxes, color=col, fontsize=11.5,
+                  fontweight="bold", ha="center", va="center", family=FMONO, zorder=5)
+
+    # SIGNAL DETAILS
+    stitle(0.965, "SIGNAL DETAILS")
+    _rbox(side, 0.06, 0.885, 0.88, 0.055, PANEL2, d_col, lw=1.6, z=4)
+    side.text(0.5, 0.9125, f"{tri}  {direction}", transform=side.transAxes, color=d_col,
+              fontsize=15, fontweight="bold", ha="center", va="center", family=FMONO, zorder=5)
+
+    rows = [("Entry Time", entry_str or "--:--", TEXT),
+            ("Market", market_name, TEXT),
+            ("Martingale", "1 Step", ACCENT)]
+    ry = 0.83
+    for label, val, vcol in rows:
+        side.text(0.09, ry, "\u2022", transform=side.transAxes, color=ACCENT,
+                  fontsize=11, ha="left", va="center", zorder=5)
+        side.text(0.16, ry, label, transform=side.transAxes, color=DIM, fontsize=10.5,
+                  ha="left", va="center", family=FMONO, zorder=5)
+        side.text(0.94, ry, str(val), transform=side.transAxes, color=vcol, fontsize=10.5,
+                  fontweight="bold", ha="right", va="center", family=FMONO, zorder=5)
+        ry -= 0.058
+
+    # RESULT + PERFORMANCE (result image only)
+    if is_result:
+        rc = _result_color(result)
+        stitle(0.60, "RESULT", rc)
+        _rbox(side, 0.06, 0.505, 0.88, 0.065, PANEL2, rc, lw=1.8, z=4)
+        side.text(0.5, 0.5375, _result_label(result), transform=side.transAxes, color=rc,
+                  fontsize=17, fontweight="bold", ha="center", va="center", family=FMONO, zorder=5)
+
+        st_ = stats or {}
+        wins = int(st_.get("wins", 0)); losses = int(st_.get("losses", 0))
+        total = int(st_.get("total", wins + losses))
+        rate = (wins / total * 100) if total else 0
+
+        stitle(0.44, "PERFORMANCE")
+        side.text(0.09, 0.385, "WIN RATE", transform=side.transAxes, color=DIM,
+                  fontsize=10, fontweight="bold", ha="left", va="center", family=FMONO)
+        side.text(0.94, 0.385, f"{rate:.0f}%", transform=side.transAxes, color=WIN_COL,
+                  fontsize=11, fontweight="bold", ha="right", va="center", family=FMONO)
+        # progress bar
+        _rbox(side, 0.06, 0.335, 0.88, 0.022, "#10202f", BORDER, lw=0.8, pad=0.004, z=4)
+        side.add_patch(FancyBboxPatch(
+            (0.07, 0.34), 0.86 * max(0.02, rate / 100), 0.012, transform=side.transAxes,
+            boxstyle="round,pad=0.003,rounding_size=0.02",
+            facecolor=WIN_COL, edgecolor="none", zorder=5))
+
+        # three stat boxes
+        boxes = [("WINS", wins, WIN_COL), ("LOSSES", losses, LOSS_COL), ("TOTAL", total, ACCENT)]
+        bw = 0.275; gap = 0.0275; bx = 0.06
+        for lbl, val, col in boxes:
+            _rbox(side, bx, 0.235, bw, 0.075, PANEL2, BORDER, lw=1.0, z=4)
+            side.text(bx + bw / 2, 0.293, str(val), transform=side.transAxes, color=col,
+                      fontsize=15, fontweight="bold", ha="center", va="center", family=FMONO, zorder=5)
+            side.text(bx + bw / 2, 0.253, lbl, transform=side.transAxes, color=DIM,
+                      fontsize=8, fontweight="bold", ha="center", va="center", family=FMONO, zorder=5)
+            bx += bw + gap
+
+    # =====================================================================
+    #  FOOTER
+    # =====================================================================
+    fig.text(0.982, 0.03, "Developed by  @iamhear1", color=DIM, fontsize=10,
+             fontweight="bold", ha="right", va="center", family=FMONO)
 
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", facecolor=BG, bbox_inches="tight", pad_inches=0.05)
+    fig.savefig(buf, format="png", facecolor=BG)
     plt.close(fig)
     buf.seek(0)
     return buf.getvalue()
