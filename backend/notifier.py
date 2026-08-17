@@ -4,9 +4,11 @@ The admin UI keeps running on python-telegram-bot; only the outgoing channel
 messages go through aiogram with parse_mode=HTML so <tg-emoji> entities are
 accepted. Nothing polls here, so the two libraries never fight over getUpdates.
 
-If Telegram rejects the custom-emoji entities (the bot is not allowed to use
-them in that chat), the same message is resent with the plain fallback emoji
-instead of failing.
+Every outgoing message is passed through premium_emojis.premiumize(), which
+upgrades any plain emoji listed in data/premium_emojis.json to a Telegram
+premium (custom) emoji. If Telegram rejects the custom-emoji entities (the bot
+is not allowed to use them in that chat), the same message is resent with the
+plain emoji instead of failing.
 """
 import logging
 
@@ -16,7 +18,7 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import BufferedInputFile
 
-import messages
+from premium_emojis import premiumize, strip_custom_emoji
 from config import BOT_TOKEN
 
 log = logging.getLogger("notifier")
@@ -47,7 +49,8 @@ class Notifier:
         photo = BufferedInputFile(png, filename="chart.png")
         if self.custom_emoji_ok:
             try:
-                return await self.bot.send_photo(chat_id, photo, caption=caption)
+                return await self.bot.send_photo(
+                    chat_id, photo, caption=premiumize(caption))
             except TelegramBadRequest as e:
                 if not _is_emoji_error(e):
                     raise
@@ -56,18 +59,18 @@ class Notifier:
         # aiogram consumes the upload buffer, so build a fresh one for the retry
         return await self.bot.send_photo(
             chat_id, BufferedInputFile(png, filename="chart.png"),
-            caption=messages.strip_custom_emoji(caption))
+            caption=strip_custom_emoji(caption))
 
     async def send_message(self, chat_id, text):
         if self.custom_emoji_ok:
             try:
-                return await self.bot.send_message(chat_id, text)
+                return await self.bot.send_message(chat_id, premiumize(text))
             except TelegramBadRequest as e:
                 if not _is_emoji_error(e):
                     raise
                 self.custom_emoji_ok = False
                 log.warning(f"custom emoji rejected, falling back to plain emoji: {e}")
-        return await self.bot.send_message(chat_id, messages.strip_custom_emoji(text))
+        return await self.bot.send_message(chat_id, strip_custom_emoji(text))
 
     async def close(self):
         if self._bot is not None:

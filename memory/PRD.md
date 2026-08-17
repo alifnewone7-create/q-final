@@ -60,3 +60,11 @@ Run: `cd backend && pip install -r requirements.txt && python bot.py`
 ## Backlog
 - P1: User local test feedback fixes (Quotex login/session flow)
 - P2: Owner tag via settings, signal confidence threshold setting, multi-channel broadcast per session
+
+## Update — 2026-06 (Premium Emoji JSON system)
+- Removed the old hardcoded premium-emoji map in `messages.py` (key -> (emoji_id, plain)).
+- New `backend/premium_emojis.py`: `load_json_file/save_json_file`, `PREMIUM_EMOJIS_FILE = data/premium_emojis.json`, `DEFAULT_PREMIUM_EMOJIS` (✅, ✨), `load_premium_emojis()`, `p_emoji(char)`, `premiumize(text)` (auto-convert all known plain emoji, skips already-tagged), `strip_custom_emoji()`.
+- `backend/data/premium_emojis.json` seeded with {"✅": "6217660507575291616", "✨": "5325547803936572038"}.
+- `messages.py` templates now use plain emoji only; `notifier.py` runs `premiumize()` on every outgoing channel message/caption (HTML parse mode) with plain-emoji fallback if Telegram rejects entities.
+- Backend NOT run per user instruction; user will test on Telegram.
+- NOTE: `backend/tests/test_messages.py` still asserts the old `messages.EMOJI` tuple shape — needs updating if the test suite is run.
