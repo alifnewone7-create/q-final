@@ -24,10 +24,10 @@ from telegram.ext import (
     filters,
 )
 
-import notifier
 import premium_emojis
 import storage
 import strategies
+import user_sender
 from config import BOT_TOKEN, ADMIN_ID
 from notifier import NOTIFY
 from qx import QuotexManager
@@ -776,6 +776,20 @@ async def cmd_emoji_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     lines = [f"\U0001f48e Premium emoji check ({len(emojis)} entries)", ""]
+    tick, cross = "\u2705", "\u274c"
+    if user_sender.configured():
+        try:
+            client = await user_sender.USER.client()
+            me = await client.get_me()
+            prem = tick if getattr(me, "premium", False) else cross
+            name = me.username or me.first_name
+            lines.append(f"Sender: user account {name} (Premium: {prem})")
+        except Exception as e:
+            lines.append(f"Sender: user account \u26a0\ufe0f not usable: {e}")
+    else:
+        lines.append("Sender: BOT (TG_API_ID / TG_API_HASH / TG_SESSION not set in .env "
+                     "\u2014 Telegram blocks premium emoji in channel posts from bots)")
+    lines.append("")
     ids = list(emojis.values())
     try:
         stickers = await NOTIFY.bot.get_custom_emoji_stickers(custom_emoji_ids=ids)
@@ -796,29 +810,27 @@ async def cmd_emoji_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"(Telegram will ignore it \u2014 use {real} as the JSON key)")
 
     sample = " ".join(emojis.keys()) + "  PREMIUM EMOJI TEST"
-    ok_txt = "\u2705 rendered as premium"
+    ok_txt = "\u2705 premium emoji rendered"
     bad_txt = "\u274c sent as plain emoji"
     lines.append("")
-    try:
-        msg = await NOTIFY.send_message(update.effective_chat.id, sample)
-        ok = notifier._kept_custom_emoji(msg)
-        lines.append(f"This chat: {ok_txt if ok else bad_txt}")
-    except Exception as e:
-        lines.append(f"This chat: \u26a0\ufe0f send failed: {e}")
-
-    for ch in storage.get_channels():
+    channels = storage.get_channels()
+    if not channels:
+        lines.append("No connected channel to test \u2014 add one first.")
+    for ch in channels:
         try:
             msg = await NOTIFY.send_message(ch["id"], sample)
-            ok = notifier._kept_custom_emoji(msg)
+            ents = list(getattr(msg, "entities", None) or [])
+            ok = any(getattr(e, "type", "") == "custom_emoji"
+                     or type(e).__name__ == "MessageEntityCustomEmoji" for e in ents)
             lines.append(f"{ch['title']}: {ok_txt if ok else bad_txt}")
         except Exception as e:
             lines.append(f"{ch['title']}: \u26a0\ufe0f send failed: {e}")
 
     lines += [
         "",
-        "If a channel shows \u274c while the ids match, the account that owns this "
-        "bot needs an active Telegram Premium subscription (or a Fragment username "
-        "assigned to the bot) \u2014 Telegram drops custom emoji from bots without it.",
+        ("Channel post-এ premium emoji দেখাতে হলে: TG_API_ID / TG_API_HASH / TG_SESSION "
+         "সেট থাকতে হবে, ওই account-এ active Telegram Premium থাকতে হবে এবং সে ওই "
+         "channel-এ admin (post messages) হতে হবে।"),
     ]
     await update.message.reply_text("\n".join(lines))
 

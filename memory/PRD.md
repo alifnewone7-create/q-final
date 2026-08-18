@@ -75,3 +75,12 @@ Run: `cd backend && pip install -r requirements.txt && python bot.py`
 - New admin command `/emojitest` in bot.py: reloads JSON, validates every id via getCustomEmojiStickers (reports id-vs-emoji mismatch), sends a sample to the admin chat + every connected channel and reports premium vs plain per chat.
 - Telegram rule (Bot API 9.4, Feb 2026): a bot can only send custom emoji if the OWNER account has active Telegram Premium (or a Fragment username is assigned to the bot); the entity must wrap exactly the one emoji that the custom emoji id belongs to, otherwise it is ignored. Channel posts are the most restricted case.
 - Local env has no BOT_TOKEN and aiogram is not installed, so only py_compile + offline premiumize checks were possible. User tests on Telegram.
+
+### 2026-06 Premium emoji via Telegram Premium USER account (MTProto)
+- Bots cannot render custom emoji in channel posts, so channel posts now go through a Telethon user account when configured.
+- New `backend/user_sender.py` (Telethon 1.44.0, StringSession): `configured()`, `USER.send_message/send_photo` with real `MessageEntityCustomEmoji` entities built from `premium_emojis.to_entities()` (UTF-16 offsets verified offline).
+- New `backend/userbot_login.py`: interactive one-time login printing `TG_SESSION` (also reports whether the account has Premium).
+- `config.py`: optional `TG_API_ID`, `TG_API_HASH`, `TG_SESSION` (empty placeholders added to backend/.env).
+- `notifier.py`: if the three vars are set -> post as user account; any failure logs and falls back to the bot. `NOTIFY.close()` disconnects the Telethon client.
+- `/emojitest` now reports which sender is active, the user accounts Premium flag, id-vs-emoji validation and per-channel render result.
+- requirements.txt: added `Telethon==1.44.0`. Backend not run per user instruction.

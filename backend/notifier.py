@@ -19,6 +19,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import BufferedInputFile
 
 from premium_emojis import premiumize, strip_custom_emoji
+from user_sender import USER, configured as user_sender_configured
 from config import BOT_TOKEN
 
 log = logging.getLogger("notifier")
@@ -73,6 +74,11 @@ class Notifier:
         return self._bot
 
     async def send_photo(self, chat_id, png, caption):
+        if user_sender_configured():
+            try:
+                return await USER.send_photo(chat_id, png, caption)
+            except Exception as e:
+                log.error(f"user-account send_photo failed, using bot: {e}")
         photo = BufferedInputFile(png, filename="chart.png")
         if self.custom_emoji_ok:
             cap = premiumize(caption)
@@ -91,6 +97,11 @@ class Notifier:
             caption=strip_custom_emoji(caption))
 
     async def send_message(self, chat_id, text):
+        if user_sender_configured():
+            try:
+                return await USER.send_message(chat_id, text)
+            except Exception as e:
+                log.error(f"user-account send_message failed, using bot: {e}")
         if self.custom_emoji_ok:
             body = premiumize(text)
             try:
@@ -105,6 +116,7 @@ class Notifier:
         return await self.bot.send_message(chat_id, strip_custom_emoji(text))
 
     async def close(self):
+        await USER.close()
         if self._bot is not None:
             await self._bot.session.close()
             self._bot = None

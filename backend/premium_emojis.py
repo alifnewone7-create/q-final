@@ -66,6 +66,32 @@ def p_emoji(char):
 _TAG_RE = re.compile(r'<tg-emoji emoji-id="\d+">(.*?)</tg-emoji>', re.DOTALL)
 
 
+def to_entities(text):
+    """(plain_text, [(utf16_offset, utf16_length, custom_emoji_id), ...])
+
+    Used by the MTProto user-account sender, which needs real
+    MessageEntityCustomEmoji entities instead of HTML tags.
+    """
+    plain = strip_custom_emoji(text)
+    if not PREMIUM_EMOJIS:
+        return plain, []
+    keys = sorted(PREMIUM_EMOJIS, key=len, reverse=True)
+    ents = []
+    i = 0
+    off = 0  # UTF-16 code units, as Telegram expects
+    while i < len(plain):
+        match = next((k for k in keys if k and plain.startswith(k, i)), None)
+        if match:
+            length = len(match.encode("utf-16-le")) // 2
+            ents.append((off, length, int(PREMIUM_EMOJIS[match])))
+            off += length
+            i += len(match)
+        else:
+            off += len(plain[i].encode("utf-16-le")) // 2
+            i += 1
+    return plain, ents
+
+
 def premiumize(text):
     """Replace every known plain emoji in the text with its premium version."""
     if not text or not PREMIUM_EMOJIS:
