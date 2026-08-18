@@ -97,3 +97,10 @@ Run: `cd backend && pip install -r requirements.txt && python bot.py`
 - result: 🦅→🔥, 💘→🎯, 😍→👍, WIN/LOSS row hyphen removed: `LOSS : 03 - (70%)` → `LOSS : 03 | (70%)`
 - partial (sessions.py): `✔ Total:N` → `☠️ Total : N`; `🤖 -> (N%)` → `⚖️ > (N%)`
 - Verified rendered output matches the users pasted target exactly; 51 emoji-pipeline tests still pass.
+
+### 2026-06 Per-trade % martingale P&L fix (session capital gain/loss)
+- BUG: deficit was derived from net session pnl, so only one loss was remembered and banked profit masked an outstanding loss.
+- FIX (sessions.py): new session state `self.deficit` (reset in __init__ and start(), so nothing carries between sessions). Per signal: `delta = compute_delta(-self.deficit, P, result)`; `pnl += delta`; `deficit = deficit - delta` on LOSS else 0. Stakes: S = P if deficit==0 else 2*deficit; M = 2*(deficit+S). Record now stores `deficit_after`.
+- Verified numbers (P=1): LOSS -3 (deficit 3); LOSS+WIN +3; LOSS+MTG_WIN +9; LOSS,LOSS -27 (next stake 54) then WIN +27; LOSS x3 -243; WIN,LOSS,WIN -> +4 (deficit 3 after the loss, the reported bug).
+- testing_agent iteration_10: 132 passed, new suite /app/backend/tests/test_martingale_pnl.py (35 tests). No functional issues found.
+- Open (optional): pnl+deficit are in-memory only, a mid-session restart resets the ladder (deficit_after is in storage and could be rehydrated). Stale legacy tests test_messages.py + test_bot_units.py::TestDuplicateGuard (21 pre-existing failures) still assert the old architecture.

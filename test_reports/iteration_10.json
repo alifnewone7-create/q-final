@@ -1,0 +1,46 @@
+{
+  "summary": "Backend-only, fully offline verification of the per-trade-percentage martingale deficit fix in /app/backend/sessions.py. Added /app/backend/tests/test_martingale_pnl.py (35 tests, all passing) covering compute_delta for WIN/WIN_MTG/LOSS at deficit 0/3/27/243 with P=0.5/1.0/2.5, the full deficit+pnl chain exactly as _run_signal applies it, SessionManager deficit instance state and reset on start(), the signal record fields, and result_caption/partial_text rendering. All of the user's expected numbers reproduce exactly: LOSS -> -3 (deficit 3); [LOSS,WIN] -> +3; [LOSS,WIN_MTG] -> +9; [LOSS,LOSS] -> -27 (deficit 27) then WIN stake 54 -> pnl +27; [LOSS,LOSS,LOSS] -> -243 with deficit 243; and the reported bug case [WIN,LOSS,WIN] -> pnl +4 with deficit 3 (NOT 2) after the loss, so the recovery stake is 6. Deficit accumulates for EVERY loss (verified [LOSS,WIN,LOSS,LOSS] -> deficit 0 -> 3 -> 27) and clears on any win. SessionManager.__init__ sets self.deficit = 0.0 and start() resets pnl/deficit/signals - verified with stubbed bot/qx and cancelled background tasks, including a second start() after a losing session (no carry-over). Legacy asserts in test_qx_bugfix.py still hold. Regression suite: test_premium_emoji_pipeline.py (51), test_qx_bugfix.py, test_strategies.py, test_login_extraction.py + new file = 132 passed. No Telegram/Quotex network calls; bot never started.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "sessions.SessionManager (state durability)",
+        "issue": "self.deficit (like self.pnl) is in-memory only. If the process restarts mid-session the outstanding deficit is silently lost and the next signal stakes P instead of 2*deficit. deficit_after is already written into the signal record, so it could be rehydrated from storage on startup."
+      },
+      {
+        "endpoint": "sessions.compute_delta(neg_deficit, ...)",
+        "issue": "API smell only: the function takes the deficit as a NEGATIVE number (call site passes -self.deficit) and silently treats any value >= 0 as 'no deficit'. A positive deficit passed by mistake would be ignored with no error. Consider accepting a plain non-negative deficit."
+      },
+      {
+        "endpoint": "tests/test_messages.py, tests/test_bot_units.py (PRE-EXISTING, not caused by this fix)",
+        "issue": "21 stale failures at HEAD, confirmed identical with the sessions.py change stashed: test_messages.py (17) still asserts raw <tg-emoji> tags and HTML-escaping inside messages.py, which moved to premium_emojis/notifier; test_bot_units.py TestDuplicateGuard (2) asserts sm.bot.photos although sends now go via NOTIFY; TestEnsureConnected (2) known qx.py/session.json issues. These test files need updating to the current architecture."
+      },
+      {
+        "endpoint": "test hygiene",
+        "issue": "Running the existing suite appends real records to /app/backend/data/signals.json (test data leaks into the live store). I reverted the file with git checkout. Storage paths should be redirected to a tmp dir in tests."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_martingale_pnl.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "No functional bug found in the martingale/deficit fix - all user-specified numbers match, including the WIN-then-LOSS deficit=3 case.",
+    "Optional: persist/rehydrate session pnl+deficit so a restart mid-session does not reset the recovery ladder.",
+    "Update the stale tests/test_messages.py and tests/test_bot_units.py::TestDuplicateGuard to the NOTIFY/premium-emoji architecture (21 pre-existing failures mask real regressions).",
+    "Isolate storage writes in tests so backend/data/signals.json is not polluted."
+  ],
+  "critical_code_review_comments": [
+    "sessions.py deficit update `self.deficit = self.deficit - delta if LOSS else 0.0` is correct (delta = -(S+M)) but relies on the sign convention; a comment/helper would prevent future regressions.",
+    "sessions.py is large and mixes messaging, charting, scanning and P&L logic; the P&L model (compute_delta + deficit bookkeeping) would be safer in its own module."
+  ],
+  "updated_files": ["/app/backend/tests/test_martingale_pnl.py"],
+  "success_rate": {"backend": "100% (132/132 on the martingale + premium-emoji + strategy suites; 21 pre-existing stale failures in test_messages.py/test_bot_units.py excluded and confirmed unrelated)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "None persisted; stubbed bot/qx objects only. Reverted accidental appends to backend/data/signals.json caused by pre-existing tests.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Martingale deficit model is fully covered by /app/backend/tests/test_martingale_pnl.py (35 tests). Rendering assertions must compare against messages.mono(...) output (monospace unicode digits), not plain ASCII. conftest.py provides asyncio support and an offline Telegram guard. Known pre-existing failures (verified at HEAD without the sessions.py change): tests/test_messages.py (17) and tests/test_bot_units.py TestDuplicateGuard+TestEnsureConnected (4).",
+  "rca_of_the_issue": "The old compute_delta derived the deficit from net session P&L (deficit = -pnl if pnl < 0), so banked profit masked an outstanding loss and only one loss could ever be recovered. The fix introduces explicit SessionManager.deficit state, passes -self.deficit into compute_delta, and adds the full lost amount (S+M) to the deficit on every LOSS (deficit -= delta), clearing it on any win. Verified numerically for all sequences the user specified."
+}

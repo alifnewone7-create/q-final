@@ -35,17 +35,20 @@ def result_caption(display, direction, entry_str, result, wins=0, losses=0, tota
                                    wins=wins, losses=losses, total_pct=total_pct)
 
 
-def compute_delta(pnl, per_trade_pct, result):
-    """Session P&L change for one signal using the martingale recovery model.
+def compute_delta(neg_deficit, per_trade_pct, result):
+    """P&L change for one signal using the martingale recovery model.
 
-    * first-trade stake S = per_trade_pct when there is no running deficit,
+    `neg_deficit` is the outstanding session loss as a negative number
+    (0 when nothing has to be recovered).
+
+    * first-trade stake S = per_trade_pct when there is no deficit,
       otherwise S = 2 x deficit (recover the outstanding loss).
     * MTG stake M = 2 x (deficit + S)  (double the deficit after a first loss).
       WIN      -> +S
       WIN_MTG  -> -S + M
       LOSS     -> -S - M
     """
-    deficit = -pnl if pnl < 0 else 0.0
+    deficit = -neg_deficit if neg_deficit < 0 else 0.0
     s = per_trade_pct if deficit <= 0 else 2 * deficit
     m = 2 * (deficit + s)
     if result == "WIN":
@@ -69,6 +72,7 @@ class SessionManager:
         self.signals = []
         self.session_id = None
         self.pnl = 0.0
+        self.deficit = 0.0
         # auto-select mode
         self.auto_mode = False
         self.auto_threshold = 0
@@ -111,6 +115,7 @@ class SessionManager:
         self.session_id = f"S{int(time.time())}"
         self.signals = []
         self.pnl = 0.0
+        self.deficit = 0.0
         self._sent_entries = set()
         self.auto_mode = auto_mode
         self.auto_threshold = auto_threshold
@@ -335,8 +340,10 @@ class SessionManager:
 
         # performance stats for THIS session, including the current result
         per_trade = float(storage.get_settings().get("per_trade_pct", 1.0))
-        delta = compute_delta(self.pnl, per_trade, result)
+        delta = compute_delta(-self.deficit, per_trade, result)
         self.pnl += delta
+        # outstanding loss carried into the next signal of this session
+        self.deficit = (self.deficit - delta) if result == "LOSS" else 0.0
 
         prior = [s.get("result") for s in self.signals]
         all_res = prior + [result]
@@ -368,6 +375,7 @@ class SessionManager:
             "result": result,
             "pnl_delta": delta,
             "pnl_total": self.pnl,
+            "deficit_after": self.deficit,
             "channel_id": self.channel_id,
         }
         self.signals.append(record)
@@ -409,7 +417,7 @@ class SessionManager:
         lines = [
             f"=========== {mono('PARTIAL')} ===========",
             PLINE,
-            f"\U0001f4c5 {mono(date_str)}",
+            f"\U0001f5d3 {mono(date_str)}",
             PLINE,
             f"\u2620\ufe0f {mono('Total')} : {mono(len(sigs))}",
             PLINE,
