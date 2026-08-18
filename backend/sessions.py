@@ -411,7 +411,7 @@ class SessionManager:
             PLINE,
             f"\U0001f4c5 {mono(date_str)}",
             PLINE,
-            f"\u2714 {mono('Total')}:{mono(len(sigs))}",
+            f"\u2620\ufe0f {mono('Total')} : {mono(len(sigs))}",
             PLINE,
         ]
         wins = losses = 0
@@ -431,7 +431,7 @@ class SessionManager:
         lines += [
             PLINE,
             f"\U0001f525 {mono('Win')}: {mono(wins)} | \u274c {mono('Loss')}: {mono(losses)} "
-            f"| \U0001f916 -> ({mono(pct)}%)",
+            f"| \u2696\ufe0f > ({mono(pct)}%)",
             PLINE,
             f"\U0001f300 {mono('TOTAL')} : {mono(messages._fmt_pct(total_pct))}% {tail}",
             PLINE,

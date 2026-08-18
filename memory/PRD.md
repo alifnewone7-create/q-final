@@ -91,3 +91,9 @@ Run: `cd backend && pip install -r requirements.txt && python bot.py`
 - Fix from test report (minor): bot HTML path was no longer escaping dynamic values. `premium_emojis._replace_all` now html-escapes text chunks and new `plain_html()` is used for the bot fallback; MTProto path stays raw (entities based).
 - Test suite: /app/backend/tests/test_premium_emoji_pipeline.py (51 passed, offline, no Telegram calls).
 - Known pre-existing failures unrelated to emoji work: tests/test_bot_units.py::TestEnsureConnected (qx.py error text + session.json cleanup).
+
+### 2026-06 Message template emoji/format update (user-provided target)
+- signal: 🚀→🔥, PUT: 🔴→🟥
+- result: 🦅→🔥, 💘→🎯, 😍→👍, WIN/LOSS row hyphen removed: `LOSS : 03 - (70%)` → `LOSS : 03 | (70%)`
+- partial (sessions.py): `✔ Total:N` → `☠️ Total : N`; `🤖 -> (N%)` → `⚖️ > (N%)`
+- Verified rendered output matches the users pasted target exactly; 51 emoji-pipeline tests still pass.

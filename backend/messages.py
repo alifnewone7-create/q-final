@@ -12,18 +12,18 @@ from premium_emojis import premiumize, strip_custom_emoji  # noqa: F401
 EMOJI = {
     "brand":       "\u2728",
     "asset":       "\U0001f48e",
-    "signal":      "\U0001f680",
+    "signal":      "\U0001f525",
     "call":        "\U0001f7e2",
-    "put":         "\U0001f534",
+    "put":         "\U0001f7e5",
     "entry":       "\u23f3",
     "payout":      "\U0001f4b5",
     "mtg":         "\U0001f6e1",
     "owner":       "\U0001f451",
     "analysis":    "\U0001f4a1",
     "result_head": "\U0001f4ca",
-    "res_signal":  "\U0001f985",
+    "res_signal":  "\U0001f525",
     "time":        "\u23f3",
-    "result":      "\U0001f498",
+    "result":      "\U0001f3af",
     "win":         "\u2705",
     "loss":        "\u274c",
 }
@@ -102,7 +102,7 @@ def result_caption(display, direction, time_str, result,
         f"{em('time')} {mono('Time')} : {mono(time_str)}\n\n"
         f"{em('result')} {mono('Result')} : {res}\n"
         f"{RLINE}\n\n"
-        f"\U0001f60d {mono('WIN')} : {mono(f'{wins:02d}')} | "
-        f"{mono('LOSS')} : {mono(f'{losses:02d}')} - ({mono(f'{rate}')}%)\n"
+        f"\U0001f44d {mono('WIN')} : {mono(f'{wins:02d}')} | "
+        f"{mono('LOSS')} : {mono(f'{losses:02d}')} | ({mono(f'{rate}')}%)\n"
         f"\U0001f300 {mono('Total')} : {mono(_fmt_pct(total_pct))}% {tail}"
     )
