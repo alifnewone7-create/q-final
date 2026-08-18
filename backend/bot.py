@@ -178,20 +178,20 @@ async def on_chat_shared(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Auto-register a channel as soon as the bot is promoted to admin in it."""
+    """Being promoted does NOT connect a channel — the admin must add it from
+    the Add Channel menu. Losing admin rights disconnects it."""
     cm = update.my_chat_member
     if not cm or cm.chat.type != "channel":
         return
     if cm.new_chat_member.status == ChatMemberStatus.ADMINISTRATOR:
-        added = storage.add_channel(cm.chat.id, cm.chat.title or str(cm.chat.id))
-        if added:
-            try:
-                await context.bot.send_message(
-                    chat_id=ADMIN_ID,
-                    text=f"\u2705 Bot was made admin in \U0001f4e2 {cm.chat.title} \u2014 channel connected automatically!",
-                )
-            except Exception:
-                pass
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(f"\u2139\ufe0f Bot is now admin in \U0001f4e2 {cm.chat.title}.\n"
+                      "It is NOT connected yet \u2014 use \u2795 Add Channel and select it."),
+            )
+        except Exception:
+            pass
     elif cm.new_chat_member.status in (ChatMemberStatus.LEFT, ChatMemberStatus.BANNED, ChatMemberStatus.MEMBER):
         storage.remove_channel(cm.chat.id)
 
