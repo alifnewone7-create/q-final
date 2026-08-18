@@ -84,3 +84,10 @@ Run: `cd backend && pip install -r requirements.txt && python bot.py`
 - `notifier.py`: if the three vars are set -> post as user account; any failure logs and falls back to the bot. `NOTIFY.close()` disconnects the Telethon client.
 - `/emojitest` now reports which sender is active, the user accounts Premium flag, id-vs-emoji validation and per-channel render result.
 - requirements.txt: added `Telethon==1.44.0`. Backend not run per user instruction.
+
+### 2026-06 ImportError (to_entities) — root cause + HTML-escape fix
+- User VPS error `cannot import name to_entities from premium_emojis` = STALE copy of premium_emojis.py on /root/backend. /app version has to_entities (verified, testing agent iteration_9: 51 tests pass).
+- Files that must be copied together: premium_emojis.py, messages.py, notifier.py, user_sender.py, userbot_login.py, config.py, bot.py, data/premium_emojis.json, requirements.txt.
+- Fix from test report (minor): bot HTML path was no longer escaping dynamic values. `premium_emojis._replace_all` now html-escapes text chunks and new `plain_html()` is used for the bot fallback; MTProto path stays raw (entities based).
+- Test suite: /app/backend/tests/test_premium_emoji_pipeline.py (51 passed, offline, no Telegram calls).
+- Known pre-existing failures unrelated to emoji work: tests/test_bot_units.py::TestEnsureConnected (qx.py error text + session.json cleanup).

@@ -18,7 +18,7 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import BufferedInputFile
 
-from premium_emojis import premiumize, strip_custom_emoji
+from premium_emojis import plain_html, premiumize
 from user_sender import USER, configured as user_sender_configured
 from config import BOT_TOKEN
 
@@ -94,7 +94,7 @@ class Notifier:
         # aiogram consumes the upload buffer, so build a fresh one for the retry
         return await self.bot.send_photo(
             chat_id, BufferedInputFile(png, filename="chart.png"),
-            caption=strip_custom_emoji(caption))
+            caption=plain_html(caption))
 
     async def send_message(self, chat_id, text):
         if user_sender_configured():
@@ -113,7 +113,7 @@ class Notifier:
                     raise
                 self.custom_emoji_ok = False
                 log.warning(f"custom emoji rejected, falling back to plain emoji: {e}")
-        return await self.bot.send_message(chat_id, strip_custom_emoji(text))
+        return await self.bot.send_message(chat_id, plain_html(text))
 
     async def close(self):
         await USER.close()

@@ -5,6 +5,7 @@
 Regular emoji in any outgoing channel message are converted to Telegram
 Premium (custom) emoji when their emoji-id is present in data/premium_emojis.json.
 """
+import html
 import json
 import logging
 import re
@@ -108,10 +109,16 @@ def premiumize(text):
 
 
 def _replace_all(chunk):
+    chunk = html.escape(chunk, quote=False)
     for char in sorted(PREMIUM_EMOJIS, key=len, reverse=True):
         if char and char in chunk:
             chunk = chunk.replace(char, p_emoji(char))
     return chunk
+
+
+def plain_html(text):
+    """HTML-safe version of the message with the custom-emoji tags removed."""
+    return html.escape(strip_custom_emoji(text), quote=False)
 
 
 def strip_custom_emoji(text):
