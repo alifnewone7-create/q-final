@@ -51,7 +51,10 @@ CATEGORY_LABELS = {
 
 # in-memory UI state (single admin bot)
 UI = {"category": None, "markets": [], "page": 0, "selected": {},
-      "auto": None, "auto_cat": None, "await_pct": False, "await_pt": False}
+      "auto": None, "auto_cat": None, "await_pct": False, "await_pt": False,
+      "channels": {}}
+
+MAX_SESSION_CHANNELS = 2
 
 
 def is_admin(update: Update) -> bool:
@@ -184,11 +187,14 @@ async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not cm or cm.chat.type != "channel":
         return
     if cm.new_chat_member.status == ChatMemberStatus.ADMINISTRATOR:
+        known = any(c["id"] == cm.chat.id for c in storage.get_channels())
+        note = ("It is already connected \u2705"
+                if known else
+                "It is NOT connected yet \u2014 use \u2795 Add Channel and select it.")
         try:
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
-                text=(f"\u2139\ufe0f Bot is now admin in \U0001f4e2 {cm.chat.title}.\n"
-                      "It is NOT connected yet \u2014 use \u2795 Add Channel and select it."),
+                text=f"\u2139\ufe0f Bot is now admin in \U0001f4e2 {cm.chat.title}.\n{note}",
             )
         except Exception:
             pass
@@ -305,11 +311,27 @@ def market_page_view():
 
 
 def session_channel_kb():
-    channels = storage.get_channels()
-    rows = [[InlineKeyboardButton(f"\U0001f4e2 {c['title']}", callback_data=f"sc|{c['id']}")]
-            for c in channels]
+    picked = UI["channels"]
+    tick, mark = "\u2705", "\U0001f4e2"
+    rows = [[InlineKeyboardButton(
+        f"{tick if c['id'] in picked else mark} {c['title']}",
+        callback_data=f"sc|{c['id']}")] for c in storage.get_channels()]
+    rows.append([InlineKeyboardButton(
+        f"\U0001f680 Start Session ({len(picked)}/{MAX_SESSION_CHANNELS})",
+        callback_data="scgo")])
     rows.append([InlineKeyboardButton("\u2b05\ufe0f Back", callback_data="c|back")])
     return InlineKeyboardMarkup(rows)
+
+
+def channel_select_view(header=None):
+    if header is not None:
+        UI["ch_header"] = header
+    picked = UI["channels"]
+    text = (f"{UI.get('ch_header', '')}\n\n\U0001f4e2 Choose the channel(s) where signals "
+            f"will be sent (min 1, max {MAX_SESSION_CHANNELS}):")
+    if picked:
+        text += "\n\n\u2705 Selected:\n" + "\n".join(f"  \u2022 {t}" for t in picked.values())
+    return text, session_channel_kb()
 
 
 def running_kb():
@@ -493,7 +515,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup(
                     [[InlineKeyboardButton("\u2b05\ufe0f Back", callback_data="m|sess")]]))
             return
-        UI.update({"category": cat, "markets": markets, "page": 0, "selected": {}})
+        UI.update({"category": cat, "markets": markets, "page": 0, "selected": {},
+                   "auto": None, "auto_cat": None})
         text, kb = market_page_view()
         await q.edit_message_text(text, reply_markup=kb)
         return
@@ -555,11 +578,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not channels:
             await q.answer("\u26a0\ufe0f No channel connected! Use Add Channel first.", show_alert=True)
             return
+        UI["channels"] = {}
         await q.answer()
-        await q.edit_message_text(
-            f"\U0001f3af Auto Select \u2265 {pct}%\n\n"
-            f"\U0001f4e2 Choose the channel where signals will be sent:",
-            reply_markup=session_channel_kb())
+        text, kb = channel_select_view(f"\U0001f3af Auto Select \u2265 {pct}%")
+        await q.edit_message_text(text, reply_markup=kb)
         return
 
     if data.startswith("t|"):
@@ -592,10 +614,13 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         await q.answer()
         sel = "\n".join(f"  \u2022 {d}" for d in UI["selected"].values())
-        await q.edit_message_text(
-            f"\u2705 Selected markets ({len(UI['selected'])}):\n{sel}\n\n"
-            f"\U0001f4e2 Now choose the channel where signals will be sent:",
-            reply_markup=session_channel_kb())
+        UI["channels"] = {}
+        # manual flow: make sure an abandoned Auto Select threshold cannot hijack it
+        UI["auto"] = None
+        UI["auto_cat"] = None
+        text, kb = channel_select_view(
+            f"\u2705 Selected markets ({len(UI['selected'])}):\n{sel}")
+        await q.edit_message_text(text, reply_markup=kb)
         return
 
     if data.startswith("sc|"):
@@ -603,10 +628,34 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("A session is already running!", show_alert=True)
             return
         cid = int(data[3:])
-        ch = next((c for c in storage.get_channels() if c["id"] == cid), None)
-        if not ch:
-            await q.answer("Channel not found", show_alert=True)
+        if cid in UI["channels"]:
+            UI["channels"].pop(cid)
+            await q.answer()
+        else:
+            if len(UI["channels"]) >= MAX_SESSION_CHANNELS:
+                await q.answer(
+                    f"\u26a0\ufe0f Maximum {MAX_SESSION_CHANNELS} channels per session. "
+                    f"Deselect one first.", show_alert=True)
+                return
+            ch = next((c for c in storage.get_channels() if c["id"] == cid), None)
+            if not ch:
+                await q.answer("Channel not found", show_alert=True)
+                return
+            UI["channels"][cid] = ch["title"]
+            await q.answer()
+        text, kb = channel_select_view()
+        await q.edit_message_text(text, reply_markup=kb)
+        return
+
+    if data == "scgo":
+        if SM.is_running():
+            await q.answer("A session is already running!", show_alert=True)
             return
+        if not UI["channels"]:
+            await q.answer("\u26a0\ufe0f Select at least 1 channel!", show_alert=True)
+            return
+        channels = [{"id": cid, "title": title} for cid, title in UI["channels"].items()]
+        titles = ", ".join(c["title"] for c in channels)
         await q.answer()
 
         auto_pct = UI.get("auto")
@@ -620,7 +669,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=running_kb())
             msg = q.message
             await SM.start(
-                context.bot, QX, [], ch["id"], ch["title"], ticks=TICKS,
+                context.bot, QX, [], channels, ticks=TICKS,
                 auto_mode=True, auto_threshold=auto_pct, auto_category=auto_cat,
                 admin_chat_id=msg.chat_id, admin_msg_id=msg.message_id,
                 admin_kb=running_kb(),
@@ -633,14 +682,15 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                         if m["code"] == c), 0)}
                        for c, d in UI["selected"].items()]
             await q.edit_message_text(
-                f"\u2705 Session STARTED!\n\nSignals will be sent to \U0001f4e2 {ch['title']}",
+                f"\u2705 Session STARTED!\n\nSignals will be sent to \U0001f4e2 {titles}",
                 reply_markup=running_kb())
             msg = q.message
             await SM.start(
-                context.bot, QX, markets, ch["id"], ch["title"], ticks=TICKS,
+                context.bot, QX, markets, channels, ticks=TICKS,
                 admin_chat_id=msg.chat_id, admin_msg_id=msg.message_id,
                 admin_kb=running_kb(),
             )
+        UI["channels"] = {}
         # trigger initial view refresh
         await SM._refresh_admin_view()
         return

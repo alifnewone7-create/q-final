@@ -15,6 +15,7 @@ CHART_CANDLES = 60       # candles drawn on the chart image sent to the channel
 SCAN_START_SEC = 3       # second of the minute the scan begins (earlier = earlier signal)
 SCAN_RESERVE = 8         # stop scanning this many seconds before the entry minute
 EARLY_EXIT_CONF = 88.0   # take a candidate immediately once it scores this high
+BROADCAST_GAP = 3        # seconds between channels when posting to more than one
 PLINE = messages.PLINE
 
 
@@ -62,8 +63,7 @@ class SessionManager:
     def __init__(self):
         self.active = False
         self.markets = []
-        self.channel_id = None
-        self.channel_title = ""
+        self.channels = []
         self.bot = None
         self.qx = None
         self.ticks = None
@@ -96,7 +96,7 @@ class SessionManager:
             except (asyncio.CancelledError, Exception):
                 pass
 
-    async def start(self, bot, qx, markets, channel_id, channel_title, ticks=None,
+    async def start(self, bot, qx, markets, channels, ticks=None,
                     auto_mode=False, auto_threshold=0, auto_category="all",
                     admin_chat_id=None, admin_msg_id=None, admin_kb=None):
         # make sure no leftover task from a previous session is still running
@@ -110,8 +110,7 @@ class SessionManager:
         self.qx = qx
         self.ticks = ticks
         self.markets = markets
-        self.channel_id = channel_id
-        self.channel_title = channel_title
+        self.channels = list(channels or [])
         self.session_id = f"S{int(time.time())}"
         self.signals = []
         self.pnl = 0.0
@@ -178,11 +177,35 @@ class SessionManager:
             if "not modified" not in msg:
                 print(f"[session] admin view edit failed: {e}")
 
+    def channel_ids(self):
+        return [c["id"] for c in self.channels]
+
+    def channel_titles(self):
+        return ", ".join(c["title"] for c in self.channels)
+
+    async def _broadcast_photo(self, png, caption):
+        for i, ch in enumerate(self.channels):
+            if i:
+                await asyncio.sleep(BROADCAST_GAP)
+            try:
+                await NOTIFY.send_photo(ch["id"], png, caption)
+            except Exception as e:
+                print(f"[session] send_photo to {ch['title']} failed: {e}")
+
+    async def _broadcast_text(self, text):
+        for i, ch in enumerate(self.channels):
+            if i:
+                await asyncio.sleep(BROADCAST_GAP)
+            try:
+                await NOTIFY.send_message(ch["id"], text)
+            except Exception as e:
+                print(f"[session] send_message to {ch['title']} failed: {e}")
+
     def running_status_text(self):
         lines = [
             "\U0001f7e2 Session RUNNING",
             "",
-            f"\U0001f4e2 Channel: {self.channel_title}",
+            f"\U0001f4e2 Channel: {self.channel_titles()}",
         ]
         if self.auto_mode:
             cat_label = {
@@ -318,8 +341,8 @@ class SessionManager:
             payout=market.get("payout", 0), entry_ts=entry_ts, entry_str=entry_str,
             market_name=market["display"], result=None,
         )
-        await NOTIFY.send_photo(
-            self.channel_id, png,
+        await self._broadcast_photo(
+            png,
             signal_caption(market["display"], direction, entry_str, res["reason"],
                            market.get("payout", 0)),
         )
@@ -358,8 +381,8 @@ class SessionManager:
             payout=market.get("payout", 0), entry_ts=entry_ts, entry_str=entry_str,
             market_name=market["display"], result=result, stats=stats,
         )
-        await NOTIFY.send_photo(
-            self.channel_id, png,
+        await self._broadcast_photo(
+            png,
             result_caption(market["display"], direction, entry_str, result,
                            wins=wins, losses=losses, total_pct=self.pnl),
         )
@@ -376,7 +399,8 @@ class SessionManager:
             "pnl_delta": delta,
             "pnl_total": self.pnl,
             "deficit_after": self.deficit,
-            "channel_id": self.channel_id,
+            "channel_id": self.channel_ids()[0] if self.channels else None,
+            "channel_ids": self.channel_ids(),
         }
         self.signals.append(record)
         storage.append_signal(record)
@@ -448,9 +472,9 @@ class SessionManager:
 
     async def send_partial(self):
         text = self.partial_text()
-        if not text or not self.channel_id:
+        if not text or not self.channels:
             return False
-        await NOTIFY.send_message(self.channel_id, text)
+        await self._broadcast_text(text)
         return True
 
 

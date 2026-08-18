@@ -104,3 +104,10 @@ Run: `cd backend && pip install -r requirements.txt && python bot.py`
 - Verified numbers (P=1): LOSS -3 (deficit 3); LOSS+WIN +3; LOSS+MTG_WIN +9; LOSS,LOSS -27 (next stake 54) then WIN +27; LOSS x3 -243; WIN,LOSS,WIN -> +4 (deficit 3 after the loss, the reported bug).
 - testing_agent iteration_10: 132 passed, new suite /app/backend/tests/test_martingale_pnl.py (35 tests). No functional issues found.
 - Open (optional): pnl+deficit are in-memory only, a mid-session restart resets the ladder (deficit_after is in storage and could be rehydrated). Stale legacy tests test_messages.py + test_bot_units.py::TestDuplicateGuard (21 pre-existing failures) still assert the old architecture.
+
+### 2026-06 Channel connect policy + multi-channel session (max 2)
+- on_my_chat_member no longer auto-connects a channel on promotion (only notifies admin; says "already connected" if it is). Losing admin/left/banned still removes it. Only the ➕ Add Channel (chat_shared) flow adds channels, and only if the bot is admin/owner there.
+- Session start now multi-select: `sc|<id>` toggles, min 1 / max 2 (MAX_SESSION_CHANNELS in bot.py), new `scgo` starts the session. UI keys: `channels`, `ch_header`. Works for both manual and Auto Select flows; `go` and `c|<cat>` now clear stale UI[auto]/auto_cat.
+- sessions.SessionManager: `channels` list replaces channel_id/channel_title; `channel_ids()`, `channel_titles()`, `_broadcast_photo/_broadcast_text` post to every channel with BROADCAST_GAP=3s between them and per-channel error isolation; record stores channel_id + channel_ids; send_partial broadcasts.
+- SM.start signature: start(bot, qx, markets, channels, ...).
+- testing_agent iteration_11 + fixes: 130 passed (new suite tests/test_channel_selection.py). Fixed the reported defect (stale auto hijacking a manual session) and updated stale test_bot_units signature. Remaining 4 failures in tests/test_bot_units.py (DuplicateGuard/EnsureConnected) are pre-existing and unrelated.

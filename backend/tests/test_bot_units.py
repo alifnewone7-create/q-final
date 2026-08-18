@@ -466,7 +466,7 @@ class TestAutoSelectFilter:
         sm = SessionManager()
         sm.auto_mode = True
         sm.auto_threshold = 82
-        sm.channel_title = "MyCH"
+        sm.channels = [{"id": 1, "title": "MyCH"}]
         sm.markets = [{"code": "X_otc", "display": "X OTC", "payout": 90}]
         txt = sm.running_status_text()
         assert "Auto Select" in txt
@@ -646,7 +646,7 @@ class TestSessionLifecycle:
             markets = [{"code": "X", "display": "X", "payout": 90}]
             await sm.start(
                 bot=FakeBot(), qx=FakeQxForRun(100.4),
-                markets=markets, channel_id=1, channel_title="t",
+                markets=markets, channels=[{"id": 1, "title": "t"}],
                 auto_mode=False,
             )
 
@@ -743,7 +743,7 @@ class TestGetMarketsCategoryFilter:
         sm.auto_mode = True
         sm.auto_threshold = 80
         sm.auto_category = "otcreal"
-        sm.channel_title = "CH"
+        sm.channels = [{"id": 1, "title": "CH"}]
         sm.markets = []
         txt = sm.running_status_text()
         assert "OTC + Real" in txt

@@ -1,0 +1,37 @@
+{
+  "summary": "Backend-only offline unit testing of the two reviewed changes in /app/backend (no network, no bot start). Created /app/backend/tests/test_channel_selection.py with 44 tests (43 pass + 1 strict-xfail documenting a real defect) covering: on_my_chat_member no-auto-connect + auto-removal, on_chat_shared admin gate, channel multi-select keyboard/view, 'sc|' toggle limits, 'scgo' start (manual + auto), SessionManager.channels/channel_ids/channel_titles/running_status_text, _broadcast_photo/_broadcast_text fan-out with gap + failure isolation, signal record channel_id/channel_ids, send_partial. Regression suites test_martingale_pnl.py (35) and test_premium_emoji_pipeline.py (51) still pass -> 129 passed, 1 xfailed. Full suite run: 22 failures, 21 of which are the known stale suites; 1 additional stale failure is caused by the SM.start signature change.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "bot.on_callback 'scgo' / 'c|<cat>'", "issue": "DEFECT: UI['auto'] is never cleared when the admin abandons the Auto Select flow and picks a market category manually (c|<cat> only resets category/markets/page/selected). A stale threshold therefore makes 'scgo' take the auto branch: SM.start is called with auto_mode=True and markets=[], silently discarding the manually selected markets. Reproduced by tests/test_channel_selection.py::TestScGo::test_stale_auto_does_not_hijack_manual_flow (strict xfail)."},
+      {"endpoint": "tests/test_bot_units.py::TestSessionLifecycle::test_start_cancels_previous_running_tasks", "issue": "Stale test now fails: still calls SM.start(..., channel_id=1, channel_title='t') -> TypeError after the signature change to (markets, channels). Needs updating to the new signature (app code is correct)."},
+      {"endpoint": "tests/test_messages.py (17 failures) + test_bot_units.py TestDuplicateGuard(2)/TestEnsureConnected(2)", "issue": "Known pre-existing stale failures, unrelated to this change (assert old architecture). Confirmed still failing."},
+      {"endpoint": "tests/test_messages.py::TestSessionsIntegration + tests/test_strategies.py", "issue": "Test-data leakage: these legacy tests call the real storage.append_signal/save_settings, so running the suite appends a fake signal into backend/data/signals.json and rewrites data/settings.json (dropping per_trade_pct). I reverted the signals.json pollution; legacy tests should monkeypatch storage paths."},
+      {"endpoint": "bot.on_my_chat_member", "issue": "Minor UX: the promotion notice always says 'It is NOT connected yet' even when that channel is already stored in channels.json, which can confuse the admin."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_channel_selection.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Reset UI['auto'] (and UI['auto_cat']) when a manual market category is chosen (c|<cat>) or in the 'go' handler, so an abandoned Auto Select threshold cannot hijack a manual session.",
+    "Update tests/test_bot_units.py::TestSessionLifecycle::test_start_cancels_previous_running_tasks to the new SM.start(bot, qx, markets, channels, ...) signature.",
+    "Optional: make legacy tests (test_messages.py, test_strategies.py) monkeypatch storage file paths so backend/data/*.json is not mutated by test runs.",
+    "Optional: soften the promotion notification when the channel is already connected."
+  ],
+  "critical_code_review_comments": [
+    "Verified change 1: on_my_chat_member never calls storage.add_channel on ADMINISTRATOR (only notifies ADMIN_ID) and calls storage.remove_channel on LEFT/BANNED/MEMBER; non-channel chat types and missing my_chat_member are ignored. on_chat_shared stores only for ADMINISTRATOR/OWNER, and on any other status or exception replies with the 'Bot is NOT admin' message and stores nothing (request_id != 100 and non-admin users ignored).",
+    "Verified change 2: session_channel_kb renders one row per channel with the correct tick/megaphone prefix, 'scgo' Start button labelled (n/2) and 'c|back'; channel_select_view keeps UI['ch_header'] when called without a header; 'sc|' toggles, rejects a third channel with show_alert 'Maximum 2 channels per session' while keeping 2 entries, alerts 'Channel not found' for unknown ids and 'A session is already running!' when active; 'scgo' alerts 'Select at least 1 channel!' without calling SM.start and otherwise passes channels as the 4th positional arg as [{'id','title'}] then clears UI['channels'] (auto flow passes auto_mode/auto_threshold/auto_category and resets UI['auto']).",
+    "Verified sessions.py: channels stored via list(channels or []), channel_ids/channel_titles, running_status_text shows both titles comma-separated, _broadcast_* iterate in order with exactly one BROADCAST_GAP sleep between channels (none before the first) and swallow+log a per-channel failure so the other channel still receives the post; the appended record carries channel_id (first) and channel_ids (all); send_partial returns False with no channels/no signals and otherwise broadcasts identical text to every channel.",
+    "UI is a module-level mutable dict shared across flows — the stale UI['auto'] bug is a symptom; consider a small dataclass/state reset helper per flow entry point."
+  ],
+  "updated_files": ["/app/backend/tests/test_channel_selection.py"],
+  "success_rate": {"backend": "100% of new/targeted tests (43 pass, 1 strict-xfail defect) + 86/86 regression; full suite 221/243 (22 stale failures)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "None persisted — all storage json paths monkeypatched to tmp_path; polluted backend/data/signals.json entry left by legacy tests was reverted via git checkout.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "New offline suite: /app/backend/tests/test_channel_selection.py (run `cd /app/backend && python -m pytest tests/test_channel_selection.py -n 0 -q`). It uses local FakeBot/FakeQuery/FakeUpdate stubs, an SMStub for bot.SM, a NotifyStub for sessions.NOTIFY and a tmp_storage fixture. The single xfail(strict=True) will start FAILING as XPASS once the stale-UI['auto'] bug is fixed — convert it into a normal test then. Known stale failures to ignore: tests/test_messages.py (17), test_bot_units.py TestDuplicateGuard(2)/TestEnsureConnected(2) and now TestSessionLifecycle::test_start_cancels_previous_running_tasks (old SM.start signature).",
+  "rca_of_the_issue": "Stale-auto defect: bot.UI['auto'] is set as soon as a threshold button 'at|<pct>' is tapped, but the manual path (c|<cat> -> t| -> go -> scgo) never clears it; the 'scgo' handler branches on `UI.get('auto')`, so it calls SM.start with auto_mode=True and markets=[] and the admin's manual market selection is dropped. Repro: tap Auto Select % -> >=85% -> m|sess -> a category -> select markets -> Start Session -> pick a channel -> Start Session. Fix: reset UI['auto']/UI['auto_cat'] in the c|<cat> (or 'go') handler."
+}
